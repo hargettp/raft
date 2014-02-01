@@ -20,7 +20,6 @@ module Control.Consensus.Raft.Types (
     Configuration(..),
         clusterLeader,
         clusterMembers,
-    Index,
     ServerId,
     Term,
     Timeout
@@ -40,8 +39,6 @@ import Network.Endpoints
 --------------------------------------------------------------------------------
 
 type Term = Int
-
-type Index = Int
 
 type ServerId = Name
 

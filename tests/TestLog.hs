@@ -8,7 +8,7 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- Unit tests for basic 'Log' typeclass.
 --
 -----------------------------------------------------------------------------
 
@@ -43,40 +43,41 @@ tests = [
 
 testNewLog :: Assertion
 testNewLog = do
-    _ <- newNumberLog
+    _ <- newLog :: IO NumberLog
     return ()
 
 testEmptyLog :: Assertion
 testEmptyLog = do
-    log <- newNumberLog
-    let val = 0
-    chg <- (logCommit log) 0 val
+    log <- newLog :: IO NumberLog
+    let val = 0 :: Int
+    chg <- commitLog log 0 val
     assertEqual "Empty log should leave value unchanged" val chg
 
 testSingleAction :: Assertion
 testSingleAction = do
-    log <- newNumberLog
-    (logAppendEntries log) 0 [LogEntry (+ 2)]
-    let val = 1
-    entries <- (logFetchEntries) log 0 1
-    lastIndex <- (logLastAppendedIndex log)
+    log <- newLog :: IO NumberLog
+    appendLog log 0 [LogEntry (+ 2)]
+    let val = 1 :: Int
+    entries <- fetchEntries log 0 1
+    lastIndex <- lastAppended log
     assertEqual "Log index should be 0" 0 lastIndex
     assertBool "Log should not be empty" (not $ null entries)
-    chg <- (logCommit log) 0 val
+    chg <- commitLog log 0 val
     assertEqual "Committing simple log did not match expected value" 3 chg
-    committedIndex <- (logLastCommittedIndex log)
+    committedIndex <- lastCommitted log
     assertEqual "Committed index sould be equal to lastIndex" lastIndex committedIndex
 
 testDoubleAction :: Assertion
 testDoubleAction = do
-    log <- newNumberLog
-    (logAppendEntries log) 0 [LogEntry (+ 2),LogEntry ( * 5)]
+    log <- newLog :: IO NumberLog
+    appendLog log 0 [LogEntry (+ 2),LogEntry ( * 5)]
     let val = 1
-    entries <- (logFetchEntries) log 0 1
-    lastIndex <- (logLastAppendedIndex log)
-    assertEqual "Log index incorrect" 1 lastIndex
+    entries <- fetchEntries log 0 2
     assertBool "Log should not be empty" (not $ null entries)
-    chg <- (logCommit log) 1 val
+    assertEqual "Length incorrect" 2 (length entries)
+    lastIndex <- lastAppended log
+    assertEqual "Appended index incorrect" 1 lastIndex
+    chg <- commitLog log 1 val
     assertEqual "Committing simple log did not match expected value" 15 chg
-    committedIndex <- (logLastCommittedIndex log)
+    committedIndex <- lastCommitted log
     assertEqual "Committed index sould be equal to lastIndex" lastIndex committedIndex

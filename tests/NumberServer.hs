@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  NumberServer
@@ -8,12 +10,14 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- Basic log implementation for simple arithmetic on Ints, useful
+-- for unit tests.
 --
 -----------------------------------------------------------------------------
 
 module NumberServer (
-    newNumberLog
+    LogEntry(..),
+    NumberLog
 ) where
 
 -- local imports
@@ -24,41 +28,68 @@ import Data.Log
 
 import Control.Concurrent.STM
 
+import Prelude hiding (log)
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-newNumberLog :: IO (Log Int)
-newNumberLog = do
-    committedIndex <- atomically $ newTVar $ -1
-    lastIndex <- atomically $ newTVar $ -1
+type Action a = a -> a
+
+data LogEntry a = LogEntry {
+    entryAction :: Action a
+}
+
+instance Log NumberLog IO LogEntry Int where
+    newLog = newNumberLog
+    -- lastCommitted :: l -> m Index
+    lastCommitted log = atomically $ readTVar $ numberLogLastCommittedIndex log
+    -- lastAppended :: l -> m Index
+    lastAppended log = atomically $ readTVar $ numberLogLastAppendedIndex log
+    -- appendLog :: l -> Index -> [e s] -> m ()
+    appendLog log index newEntries = atomically $ do
+        modifyTVar (numberLogEntries log) $ \oldEntries -> (take index oldEntries) ++ newEntries
+        modifyTVar (numberLogLastAppendedIndex log) $ \oldAppended -> oldAppended + (length newEntries)
+        return ()
+    -- fetchEntries :: l -> Index -> Int -> m [e s]
+    fetchEntries log index count = atomically $ do
+        entries <- readTVar $ numberLogEntries log
+        return $ take count $ drop index entries
+    -- commitLog :: l -> Index -> s -> m s
+    commitLog log index state = atomically $ do
+        let committedIndex = numberLogLastCommittedIndex log
+        committed <- readTVar committedIndex
+        if index > committed
+            then do
+                let nextCommitted = committed + 1
+                uncommitted <- fetch nextCommitted (index - committed)
+                commit committedIndex nextCommitted uncommitted state
+            else return state
+        where
+            fetch start count = do
+                existing <- readTVar $ numberLogEntries log
+                return $ take count $ drop start existing
+            commit :: TVar Index -> Index -> [LogEntry Int] -> Int -> STM Int
+            commit committedIndex next [] oldState = do
+                writeTVar committedIndex $ next - 1
+                return oldState
+            commit committedIndex next (entry:rest) oldState = do
+                let newState = (entryAction entry) oldState
+                commit committedIndex (next + 1) rest newState
+
+
+data NumberLog = NumberLog {
+    numberLogLastCommittedIndex :: TVar Index,
+    numberLogLastAppendedIndex :: TVar Index,
+    numberLogEntries :: TVar [LogEntry Int]
+}
+
+newNumberLog :: IO NumberLog
+newNumberLog = do 
+    committed <- atomically $ newTVar $ -1
+    appended <- atomically $ newTVar $ -1
     entries <- atomically $ newTVar []
-    return Log {
-        logLastCommittedIndex = lastCommitted committedIndex,
-        logLastAppendedIndex = lastAppended lastIndex,
-        logAppendEntries = (\index newEntries -> atomically $ do
-                                modifyTVar entries $ \oldEntries -> 
-                                    (take index oldEntries) ++ newEntries
-                                modifyTVar lastIndex $ \oldIndex -> oldIndex + (length newEntries)),
-        logFetchEntries = (\index count -> atomically $ fetchEntries entries index count),
-        logCommit = (\index state -> atomically $ do
-            committed <- readTVar committedIndex
-            if index > committed
-                then do
-                    let nextCommitted = committed + 1
-                    uncommitted <- fetchEntries entries nextCommitted (index - committed)
-                    commitLog committedIndex nextCommitted uncommitted state
-                else return state
-            )
+    return NumberLog {
+        numberLogLastCommittedIndex = committed,
+        numberLogLastAppendedIndex = appended,
+        numberLogEntries = entries
     }
-    where
-        fetchEntries entries index count = do
-            existing <- readTVar entries
-            return $ take count $ drop index existing
-        lastCommitted committedIndex = atomically $ readTVar committedIndex
-        lastAppended lastIndex = atomically $ readTVar lastIndex
-        commitLog committedIndex index [] state = do
-            writeTVar committedIndex $ index - 1
-            return state
-        commitLog committedIndex index (entry:rest) state = do
-            let newState = (entryAction entry) state
-            commitLog committedIndex (index + 1) rest newState

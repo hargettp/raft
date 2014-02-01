@@ -25,7 +25,7 @@ import Control.Consensus.Raft.Types
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-data Server a = Server {
+data Server s = Server {
     serverId :: ServerId,
     serverConfiguration :: Configuration
 }
