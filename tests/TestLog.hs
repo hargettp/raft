@@ -59,7 +59,7 @@ testSingleAction = do
     (logAppendEntries log) 0 [LogEntry (+ 2)]
     let val = 1
     entries <- (logFetchEntries) log 0 1
-    lastIndex <- (logLastIndex log)
+    lastIndex <- (logLastAppendedIndex log)
     assertEqual "Log index should be 0" 0 lastIndex
     assertBool "Log should not be empty" (not $ null entries)
     chg <- (logCommit log) 0 val
@@ -73,7 +73,7 @@ testDoubleAction = do
     (logAppendEntries log) 0 [LogEntry (+ 2),LogEntry ( * 5)]
     let val = 1
     entries <- (logFetchEntries) log 0 1
-    lastIndex <- (logLastIndex log)
+    lastIndex <- (logLastAppendedIndex log)
     assertEqual "Log index incorrect" 1 lastIndex
     assertBool "Log should not be empty" (not $ null entries)
     chg <- (logCommit log) 1 val

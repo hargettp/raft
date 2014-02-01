@@ -34,7 +34,7 @@ newNumberLog = do
     entries <- atomically $ newTVar []
     return Log {
         logLastCommittedIndex = lastCommitted committedIndex,
-        logLastIndex = lastAppended lastIndex,
+        logLastAppendedIndex = lastAppended lastIndex,
         logAppendEntries = (\index newEntries -> atomically $ do
                                 modifyTVar entries $ \oldEntries -> 
                                     (take index oldEntries) ++ newEntries

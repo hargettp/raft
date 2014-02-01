@@ -31,13 +31,15 @@ import Prelude hiding (log)
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+type Action a = a -> a
+
 data LogEntry a = LogEntry {
-    entryAction :: a -> a
+    entryAction :: Action a
 }
 
 data Log a = Log {
     logLastCommittedIndex :: IO Index,
-    logLastIndex :: IO Index,
+    logLastAppendedIndex :: IO Index,
     logAppendEntries :: Index -> [LogEntry a] -> IO (),
     logFetchEntries :: Index -> Int -> IO [LogEntry a],
     logCommit :: a -> Index -> IO a
