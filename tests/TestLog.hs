@@ -50,19 +50,19 @@ testEmptyLog :: Assertion
 testEmptyLog = do
     log <- newLog :: IO NumberLog
     let val = 0 :: Int
-    chg <- commitLog log 0 val
+    chg <- commitEntries log 0 val
     assertEqual "Empty log should leave value unchanged" val chg
 
 testSingleAction :: Assertion
 testSingleAction = do
     log <- newLog :: IO NumberLog
-    appendLog log 0 [LogEntry (+ 2)]
+    appendEntries log 0 [LogEntry (+ 2)]
     let val = 1 :: Int
     entries <- fetchEntries log 0 1
     lastIndex <- lastAppended log
     assertEqual "Log index should be 0" 0 lastIndex
     assertBool "Log should not be empty" (not $ null entries)
-    chg <- commitLog log 0 val
+    chg <- commitEntries log 0 val
     assertEqual "Committing simple log did not match expected value" 3 chg
     committedIndex <- lastCommitted log
     assertEqual "Committed index sould be equal to lastIndex" lastIndex committedIndex
@@ -70,14 +70,14 @@ testSingleAction = do
 testDoubleAction :: Assertion
 testDoubleAction = do
     log <- newLog :: IO NumberLog
-    appendLog log 0 [LogEntry (+ 2),LogEntry ( * 5)]
+    appendEntries log 0 [LogEntry (+ 2),LogEntry ( * 5)]
     let val = 1
     entries <- fetchEntries log 0 2
     assertBool "Log should not be empty" (not $ null entries)
     assertEqual "Length incorrect" 2 (length entries)
     lastIndex <- lastAppended log
     assertEqual "Appended index incorrect" 1 lastIndex
-    chg <- commitLog log 1 val
+    chg <- commitEntries log 1 val
     assertEqual "Committing simple log did not match expected value" 15 chg
     committedIndex <- lastCommitted log
     assertEqual "Committed index sould be equal to lastIndex" lastIndex committedIndex

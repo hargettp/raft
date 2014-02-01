@@ -38,7 +38,7 @@ _log = "raft.consensus"
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-runConsensus :: Endpoint -> Server a -> IO ()
+runConsensus :: (Server s l m e v) => Endpoint -> s -> IO ()
 runConsensus endpoint server = do
   catch run (\e -> errorM _log $ (show $ serverId server)
                   ++ " encountered error: " ++ (show (e :: SomeException)))
@@ -57,11 +57,11 @@ runConsensus endpoint server = do
         else return ()
       participate
 
-follow :: Server a -> Endpoint -> IO ()
+follow :: (Server s l m e v) => s -> Endpoint -> IO ()
 follow _ _ = return ()
 
-elect :: Server a -> Endpoint -> IO Bool
+elect :: (Server s l m e v) => s -> Endpoint -> IO Bool
 elect _ _ = return False
 
-lead :: Server a -> Endpoint -> IO ()
+lead :: (Server s l m e v) => s -> Endpoint -> IO ()
 lead _ _ = return ()

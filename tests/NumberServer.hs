@@ -45,8 +45,8 @@ instance Log NumberLog IO LogEntry Int where
     lastCommitted log = atomically $ readTVar $ numberLogLastCommittedIndex log
     -- lastAppended :: l -> m Index
     lastAppended log = atomically $ readTVar $ numberLogLastAppendedIndex log
-    -- appendLog :: l -> Index -> [e s] -> m ()
-    appendLog log index newEntries = atomically $ do
+    -- appendEntries :: l -> Index -> [e s] -> m ()
+    appendEntries log index newEntries = atomically $ do
         modifyTVar (numberLogEntries log) $ \oldEntries -> (take index oldEntries) ++ newEntries
         modifyTVar (numberLogLastAppendedIndex log) $ \oldAppended -> oldAppended + (length newEntries)
         return ()
@@ -54,8 +54,8 @@ instance Log NumberLog IO LogEntry Int where
     fetchEntries log index count = atomically $ do
         entries <- readTVar $ numberLogEntries log
         return $ take count $ drop index entries
-    -- commitLog :: l -> Index -> s -> m s
-    commitLog log index state = atomically $ do
+    -- commitEntries :: l -> Index -> s -> m s
+    commitEntries log index state = atomically $ do
         let committedIndex = numberLogLastCommittedIndex log
         committed <- readTVar committedIndex
         if index > committed

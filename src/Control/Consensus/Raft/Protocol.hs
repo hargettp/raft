@@ -34,7 +34,7 @@ module Control.Consensus.Raft.Protocol (
 -- local imports
 
 import Control.Consensus.Raft.Types
-import Data.Log
+import Data.Log (Index)
 
 -- external imports
 

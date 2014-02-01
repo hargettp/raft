@@ -31,6 +31,11 @@ import Prelude hiding (log)
 --------------------------------------------------------------------------------
 
 {-
+An index is a logical offset into a log.
+-}
+type Index = Int
+
+{-
 A log of type @l@ is a sequence of entries of type @e@ such that
 entries can be appended to the log starting at a particular 'Index' (and potentially
 overwrite entries previously appended at the same index), fetched
@@ -46,16 +51,10 @@ producing a new state after committing as many entries as possible.
 
 Each log implementation may choose the monad @m@ in which they operate.
 -}
-class Log l m e s | l -> e,l -> s where
+class Log l m e s | l -> e,l -> s ,l -> m where
     newLog :: m l
     lastCommitted :: l -> m Index
     lastAppended :: l -> m Index
-    appendLog :: l -> Index -> [e s] -> m ()
+    appendEntries :: l -> Index -> [e s] -> m ()
     fetchEntries :: l -> Index -> Int -> m [e s]
-    commitLog :: l -> Index -> s -> m s
-
-{-
-An index is a logical offset into a log.
--}
-type Index = Int
-    
+    commitEntries :: l -> Index -> s -> m s
