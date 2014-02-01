@@ -49,12 +49,17 @@ into a new state.  Commiting log, given some initial state, applies the action c
 each entry in sequence (starting at a specified 'Index') to some state of type @s@, 
 producing a new state after committing as many entries as possible.
 
-Each log implementation may choose the monad @m@ in which they operate.
+Each log implementation may choose the monad @m@ in which they operate.  Consumers of logs
+should always use logs in a functional style: that is, after 'appendEntries' or 'commitEntries',
+if the log returned from those functions is not fed into later functions, then results
+may be unexpected.  While the underling log implementation may itself be pure, log
+methods are wrapped in a monad to support those implementations that may not be--such
+as a log whose entries and indices are read from disk.
 -}
 class Log l m e s | l -> e,l -> s ,l -> m where
     newLog :: m l
     lastCommitted :: l -> m Index
     lastAppended :: l -> m Index
-    appendEntries :: l -> Index -> [e s] -> m ()
+    appendEntries :: l -> Index -> [e s] -> m l
     fetchEntries :: l -> Index -> Int -> m [e s]
-    commitEntries :: l -> Index -> s -> m s
+    commitEntries :: l -> Index -> s -> m (l,s)

@@ -26,8 +26,6 @@ import Data.Log
 
 -- external imports
 
-import Control.Concurrent.STM
-
 import Prelude hiding (log)
 
 --------------------------------------------------------------------------------
@@ -39,57 +37,55 @@ data LogEntry a = LogEntry {
     entryAction :: Action a
 }
 
+data NumberLog = NumberLog {
+    numberLogLastCommittedIndex :: Index,
+    numberLogLastAppendedIndex :: Index,
+    numberLogEntries :: [LogEntry Int]
+}
+
+newNumberLog :: IO NumberLog
+newNumberLog = do
+    return NumberLog {
+        numberLogLastCommittedIndex = -1,
+        numberLogLastAppendedIndex = -1,
+        numberLogEntries = []
+    }
+
 instance Log NumberLog IO LogEntry Int where
     newLog = newNumberLog
     -- lastCommitted :: l -> m Index
-    lastCommitted log = atomically $ readTVar $ numberLogLastCommittedIndex log
+    lastCommitted log = return $ numberLogLastCommittedIndex log
     -- lastAppended :: l -> m Index
-    lastAppended log = atomically $ readTVar $ numberLogLastAppendedIndex log
-    -- appendEntries :: l -> Index -> [e s] -> m ()
-    appendEntries log index newEntries = atomically $ do
-        modifyTVar (numberLogEntries log) $ \oldEntries -> (take index oldEntries) ++ newEntries
-        modifyTVar (numberLogLastAppendedIndex log) $ \oldAppended -> oldAppended + (length newEntries)
-        return ()
+    lastAppended log = return $ numberLogLastAppendedIndex log
+    -- appendEntries :: l -> Index -> [e s] -> m l
+    appendEntries log index newEntries = do
+        -- TODO cleanup this logic
+        return log {
+            numberLogLastAppendedIndex = index + (length newEntries) - 1,
+            numberLogEntries = (take (index + 1) (numberLogEntries log)) ++ newEntries
+        }
     -- fetchEntries :: l -> Index -> Int -> m [e s]
-    fetchEntries log index count = atomically $ do
-        entries <- readTVar $ numberLogEntries log
+    fetchEntries log index count = do
+        let entries = numberLogEntries log
         return $ take count $ drop index entries
-    -- commitEntries :: l -> Index -> s -> m s
-    commitEntries log index state = atomically $ do
-        let committedIndex = numberLogLastCommittedIndex log
-        committed <- readTVar committedIndex
+    -- commitEntries :: l -> Index -> s -> m (l,s)
+    commitEntries log index state = do
+        let committed = numberLogLastCommittedIndex log
         if index > committed
             then do
                 let nextCommitted = committed + 1
                 uncommitted <- fetch nextCommitted (index - committed)
-                commit committedIndex nextCommitted uncommitted state
-            else return state
+                commit nextCommitted uncommitted state
+            else return (log,state)
         where
             fetch start count = do
-                existing <- readTVar $ numberLogEntries log
+                let existing = numberLogEntries log
                 return $ take count $ drop start existing
-            commit :: TVar Index -> Index -> [LogEntry Int] -> Int -> STM Int
-            commit committedIndex next [] oldState = do
-                writeTVar committedIndex $ next - 1
-                return oldState
-            commit committedIndex next (entry:rest) oldState = do
+            -- commit :: Index -> [LogEntry Int] -> Int -> STM Int
+            commit  next [] oldState = do
+                return (log {
+                        numberLogLastCommittedIndex = next -1
+                    },oldState)
+            commit next (entry:rest) oldState = do
                 let newState = (entryAction entry) oldState
-                commit committedIndex (next + 1) rest newState
-
-
-data NumberLog = NumberLog {
-    numberLogLastCommittedIndex :: TVar Index,
-    numberLogLastAppendedIndex :: TVar Index,
-    numberLogEntries :: TVar [LogEntry Int]
-}
-
-newNumberLog :: IO NumberLog
-newNumberLog = do 
-    committed <- atomically $ newTVar $ -1
-    appended <- atomically $ newTVar $ -1
-    entries <- atomically $ newTVar []
-    return NumberLog {
-        numberLogLastCommittedIndex = committed,
-        numberLogLastAppendedIndex = appended,
-        numberLogEntries = entries
-    }
+                commit (next + 1) rest newState
