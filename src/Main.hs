@@ -1,8 +1,38 @@
 -- | Main entry point to the application.
 module Main where
 
--- | The main entry point.
+-- local imports
+
+import qualified TestLog as L
+
+-- external imports
+
+import System.Directory
+import System.Log.Logger
+import System.Log.Handler.Simple
+
+import Test.Framework
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
 main :: IO ()
 main = do
-    putStrLn "Welcome to FP Haskell Center!"
-    putStrLn "Have a good day!"
+  initLogging
+  defaultMain tests
+
+initLogging :: IO ()
+initLogging = do
+  let logFile = "tests.log"
+  exists <- doesFileExist logFile
+  if exists
+    then removeFile logFile
+    else return ()
+  s <- fileHandler logFile INFO
+  updateGlobalLogger rootLoggerName (setLevel WARNING)
+  updateGlobalLogger rootLoggerName (addHandler s)
+
+tests :: [Test.Framework.Test]
+tests = [
+    ]
+    ++ L.tests
