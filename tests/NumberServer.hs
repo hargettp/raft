@@ -16,7 +16,7 @@
 -----------------------------------------------------------------------------
 
 module NumberServer (
-    LogEntry(..),
+    NumberLogEntry(..),
     NumberLog
 ) where
 
@@ -33,14 +33,14 @@ import Prelude hiding (log)
 
 type Action a = a -> a
 
-data LogEntry a = LogEntry {
+data NumberLogEntry a = NumberLogEntry {
     entryAction :: Action a
 }
 
 data NumberLog = NumberLog {
     numberLogLastCommittedIndex :: Index,
     numberLogLastAppendedIndex :: Index,
-    numberLogEntries :: [LogEntry Int]
+    numberLogEntries :: [NumberLogEntry Int]
 }
 
 newNumberLog :: IO NumberLog
@@ -51,12 +51,12 @@ newNumberLog = do
         numberLogEntries = []
     }
 
-instance Log NumberLog IO LogEntry Int where
+instance Log NumberLog IO NumberLogEntry Int where
     newLog = newNumberLog
     -- lastCommitted :: l -> m Index
-    lastCommitted log = return $ numberLogLastCommittedIndex log
+    lastCommitted log = numberLogLastCommittedIndex log
     -- lastAppended :: l -> m Index
-    lastAppended log = return $ numberLogLastAppendedIndex log
+    lastAppended log = numberLogLastAppendedIndex log
     -- appendEntries :: l -> Index -> [e s] -> m l
     appendEntries log index newEntries = do
         -- TODO cleanup this logic
@@ -81,7 +81,7 @@ instance Log NumberLog IO LogEntry Int where
             fetch start count = do
                 let existing = numberLogEntries log
                 return $ take count $ drop start existing
-            -- commit :: Index -> [LogEntry Int] -> Int -> STM Int
+            -- commit :: Index -> [NumberLogEntry Int] -> Int -> STM Int
             commit  next [] oldState = do
                 return (log {
                         numberLogLastCommittedIndex = next -1

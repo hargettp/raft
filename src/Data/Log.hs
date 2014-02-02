@@ -1,5 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE FlexibleContexts #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Log
@@ -17,7 +19,8 @@
 module Data.Log (
 
     Index,
-    Log(..)
+    Log(..),
+    LogIO
 
 ) where
 
@@ -56,10 +59,16 @@ may be unexpected.  While the underling log implementation may itself be pure, l
 methods are wrapped in a monad to support those implementations that may not be--such
 as a log whose entries and indices are read from disk.
 -}
-class Log l m e s | l -> e,l -> s ,l -> m where
+class Log l m e s | l -> e,l -> s, l -> m where
     newLog :: m l
-    lastCommitted :: l -> m Index
-    lastAppended :: l -> m Index
+    lastCommitted :: l -> Index
+    lastAppended :: l -> Index
     appendEntries :: l -> Index -> [e s] -> m l
     fetchEntries :: l -> Index -> Int -> m [e s]
     commitEntries :: l -> Index -> s -> m (l,s)
+
+{-|
+Variant of 'Log' useful for implementations that must perform 'IO' to
+change log state.
+-}
+class (Log l IO e s) => LogIO l e s
