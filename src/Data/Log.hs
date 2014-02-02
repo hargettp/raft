@@ -68,7 +68,6 @@ class Log l m e s | l -> e,l -> s, l -> m where
     commitEntries :: l -> Index -> s -> m (l,s)
 
 {-|
-Variant of 'Log' useful for implementations that must perform 'IO' to
-change log state.
+Variant of 'Log' useful for implementations that need to perform 'IO'.
 -}
 class (Log l IO e s) => LogIO l e s

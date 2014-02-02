@@ -110,7 +110,8 @@ goRequestVote :: CallSite -> [Name]
                 -> Term     -- ^^ Term of candidate's last entry
                 -> IO (M.Map Name (Maybe (Term,Bool)))
 goRequestVote cs members term candidate lastIndex lastTerm = do
-    gcallWithTimeout cs members methodRequestVote rpcTimeout (term,candidate,lastIndex,lastTerm)
+    gcallWithTimeout cs members methodRequestVote rpcTimeout 
+        $ RequestVoteRequest $ RequestVote candidate term lastIndex lastTerm
 
 {-|
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,

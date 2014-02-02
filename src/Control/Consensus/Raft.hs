@@ -33,9 +33,13 @@ import Control.Concurrent.Async
 import Control.Exception
 import Control.Concurrent.STM
 
+import qualified Data.Map as M
 import Data.Time
 
 import Network.Endpoints
+import Network.RPC
+
+import Prelude hiding (log)
 
 import System.Log.Logger
 
@@ -80,22 +84,14 @@ runConsensus endpoint server = do
                 infoM _log $ "Stopped server " ++ (serverId server) )
     participate raft= do
       follow raft endpoint
-      won <- elect raft endpoint
+      won <- volunteer raft endpoint
       if won
         then lead raft endpoint
         else return ()
       participate raft
 
 follow :: (RaftLog l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
-follow vRaft endpoint = do
-    f <- async $ doFollow vRaft endpoint
-    v <- async $ doVote vRaft endpoint
-    -- w <- async $ doWatch
-    _ <- waitAnyCancel [f,v]
-    return ()
-    -- where
-        -- watch for a heartbeat, exiting first if none found
-    --    doWatch = return ()
+follow vRaft endpoint = race_ (doFollow vRaft endpoint) (doVote vRaft endpoint)
 
 {-|
     Wait for 'AppendEntries' requests and process them, commit new changes
@@ -158,8 +154,32 @@ doVote vRaft endpoint = do
                                     then False
                                     else (lastAppended $ serverLog $ raftServer raft) < (rvCandidateLastEntryIndex req)
 
-elect :: TVar (RaftState l e v) -> Endpoint -> IO Bool
-elect _ _ = return False
+volunteer :: (RaftLog l e v) => TVar (RaftState l e v) -> Endpoint -> IO Bool
+volunteer vRaft endpoint = do
+    raft <- atomically $ readTVar vRaft
+    let members = clusterMembers $ serverConfiguration $ raftServer raft
+        candidate = serverId $ raftServer raft
+        cs = newCallSite endpoint candidate
+        term = raftCurrentTerm raft
+        log = serverLog $ raftServer raft
+        lastIndex = lastAppended log
+    lastEntries <- fetchEntries log lastIndex 1
+    case lastEntries of
+        (entry:[]) -> do
+            let lastTerm = entryTerm entry
+            votes <- goRequestVote cs members term candidate lastIndex lastTerm
+            return $ wonElection votes
+        _ -> return False
+    where
+        wonElection :: M.Map Name (Maybe (Term,Bool)) -> Bool
+        wonElection votes = majority votes $ M.foldl (\tally ballot -> 
+            case ballot of
+                Just (_,vote) -> if vote then tally + 1 else tally 
+                _ -> tally
+            )
+            0 votes
+        majority :: M.Map Name (Maybe (Term,Bool)) -> Int -> Bool
+        majority votes tally = tally > ((M.size $ votes) `quot` 2)
 
-lead :: TVar (RaftState l e v) -> Endpoint -> IO ()
+lead :: (RaftLog l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
 lead _ _ = return ()
