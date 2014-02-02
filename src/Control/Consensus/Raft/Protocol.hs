@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Control.Consensus.Raft.Protocol
@@ -111,6 +112,10 @@ goRequestVote :: CallSite -> [Name]
 goRequestVote cs members term candidate lastIndex lastTerm = do
     gcallWithTimeout cs members methodRequestVote rpcTimeout (term,candidate,lastIndex,lastTerm)
 
+{-|
+Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
+process it, and return @True@.  If none arrives before the timeout, then return @False@.
+-}
 onAppendEntries :: Endpoint -> (AppendEntries -> IO (Term,Bool)) -> IO Bool
 onAppendEntries endpoint fn = do
     msg <- selectMessageTimeout endpoint heartbeatTimeout isAppendEntries
@@ -118,7 +123,7 @@ onAppendEntries endpoint fn = do
         Just req -> do
             (term,success) <- fn req
             reply (aeLeader req) term success
-            return success
+            return True
         Nothing -> return False
     where
         isAppendEntries msg = case decode msg :: Either String RaftMessage of
@@ -128,15 +133,15 @@ onAppendEntries endpoint fn = do
                   Left _ -> Nothing
         reply leader term sucess = sendMessage_ endpoint leader $ encode $ AppendEntriesResponse term sucess
 
+{-|
+Wait for an 'RequestVote' RPC to arrive, and process it when it arrives.
+-}
 onRequestVote :: Endpoint -> (RequestVote -> IO (Term,Bool)) -> IO ()
 onRequestVote endpoint fn = do
-    msg <- selectMessageTimeout endpoint heartbeatTimeout isRequestVote
-    case msg of
-        Just req -> do
-            (term,success) <- fn req
-            reply (rvCandidate req) term success
-            return ()
-        Nothing -> return ()
+    req <- selectMessage endpoint isRequestVote
+    (term,success) <- fn req
+    reply (rvCandidate req) term success
+    return ()
     where
         isRequestVote msg = case decode msg :: Either String RaftMessage of
                   Right (RequestVoteRequest req)  ->

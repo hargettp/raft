@@ -63,8 +63,8 @@ class Log l m e s | l -> e,l -> s, l -> m where
     newLog :: m l
     lastCommitted :: l -> Index
     lastAppended :: l -> Index
-    appendEntries :: l -> Index -> [e s] -> m l
-    fetchEntries :: l -> Index -> Int -> m [e s]
+    appendEntries :: l -> Index -> [e] -> m l
+    fetchEntries :: l -> Index -> Int -> m [e]
     commitEntries :: l -> Index -> s -> m (l,s)
 
 {-|

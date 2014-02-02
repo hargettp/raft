@@ -1,5 +1,5 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
-
+{-# LANGUAGE FlexibleInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  NumberServer
@@ -51,7 +51,7 @@ newNumberLog = do
         numberLogEntries = []
     }
 
-instance Log NumberLog IO NumberLogEntry Int where
+instance Log NumberLog IO (NumberLogEntry Int) Int where
     newLog = newNumberLog
     -- lastCommitted :: l -> m Index
     lastCommitted log = numberLogLastCommittedIndex log

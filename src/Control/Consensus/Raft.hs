@@ -1,4 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -44,10 +45,12 @@ import System.Log.Logger
 _log :: String
 _log = "raft.consensus"
 
--- class (LogIO l e v) => RaftLog l e v where
---      entryTerm :: e -> Term
+class RaftLogEntry e where
+    entryTerm :: e -> Term
 
-data RaftState l e v = (LogIO l e v) => RaftState {
+class (RaftLogEntry e,LogIO l e v) => RaftLog l e v
+
+data RaftState l e v = (RaftLog l e v) => RaftState {
     raftLastUpdate :: UTCTime,
     raftCurrentTerm :: Term,
     raftLastCandidate :: Maybe ServerId,
@@ -58,7 +61,7 @@ data RaftState l e v = (LogIO l e v) => RaftState {
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-runConsensus :: (LogIO l e v) => Endpoint -> Server l e v -> IO ()
+runConsensus :: (RaftLog l e v) => Endpoint -> Server l e v -> IO ()
 runConsensus endpoint server = do
   catch run (\e -> errorM _log $ (show $ serverId server)
                   ++ " encountered error: " ++ (show (e :: SomeException)))
@@ -83,24 +86,24 @@ runConsensus endpoint server = do
         else return ()
       participate raft
 
-follow :: (LogIO l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
+follow :: (RaftLog l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
 follow vRaft endpoint = do
     f <- async $ doFollow vRaft endpoint
     v <- async $ doVote vRaft endpoint
-    w <- async $ doWatch
-    _ <- waitAnyCancel [f,v,w]
+    -- w <- async $ doWatch
+    _ <- waitAnyCancel [f,v]
     return ()
-    where
+    -- where
         -- watch for a heartbeat, exiting first if none found
-        doWatch = return ()
+    --    doWatch = return ()
 
 {-|
     Wait for 'AppendEntries' requests and process them, commit new changes
     as necessary, and stop when no heartbeat received.
 -}
-doFollow :: (LogIO l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
+doFollow :: (RaftLog l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
 doFollow vRaft endpoint = do
-    success <- onAppendEntries endpoint $ \req -> do
+    continue <- onAppendEntries endpoint $ \req -> do
         raft <- atomically $ readTVar vRaft
         if (aeLeaderTerm req) < (raftCurrentTerm raft)
             then return (raftCurrentTerm raft,False)
@@ -114,17 +117,17 @@ doFollow vRaft endpoint = do
                 entries <- fetchEntries (serverLog $ raftServer raft) (aePreviousIndex req) 1
                 case entries of
                     [] -> return (raftCurrentTerm raft1,False)
-                    -- TODO implement correctly
-                    (entry:_) -> return (raftCurrentTerm raft1,False)
+                    (entry:_) -> let term = raftCurrentTerm raft1
+                                     in return (term,(term == (entryTerm entry)) )
 
-    if success
+    if continue
         then doFollow vRaft endpoint
         else return ()
 
 {-|
 Wait for request vote requests and process them
 -}
-doVote :: (LogIO l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
+doVote :: (RaftLog l e v) => TVar (RaftState l e v) -> Endpoint -> IO ()
 doVote vRaft endpoint = do
     onRequestVote endpoint $ \req -> atomically $ do
         raft <- readTVar vRaft
