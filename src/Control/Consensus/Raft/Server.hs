@@ -34,5 +34,6 @@ import Data.Log
 data Server l e v = (LogIO l e v) => Server {
     serverId :: ServerId,
     serverConfiguration :: Configuration,
-    serverLog :: l
+    serverLog :: l,
+    serverState :: v
 }

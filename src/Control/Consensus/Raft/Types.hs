@@ -20,6 +20,7 @@ module Control.Consensus.Raft.Types (
     Configuration(..),
         clusterLeader,
         clusterMembers,
+        clusterMembersOnly,
     ServerId,
     Term,
     Timeout
@@ -29,6 +30,8 @@ module Control.Consensus.Raft.Types (
 
 -- external imports
 
+import qualified Data.List as L
+import Data.Serialize
 import Data.Typeable
 
 import GHC.Generics
@@ -61,6 +64,8 @@ data Configuration = Configuration {
           jointNewConfiguration :: Configuration
           } deriving (Generic,Show,Typeable,Eq)
 
+instance Serialize Configuration
+
 clusterLeader :: Configuration -> Maybe ServerId
 clusterLeader Configuration {configurationLeader = leaderId} = leaderId
 clusterLeader (JointConfiguration _ configuration) = clusterLeader configuration
@@ -68,3 +73,8 @@ clusterLeader (JointConfiguration _ configuration) = clusterLeader configuration
 clusterMembers :: Configuration -> [ServerId]
 clusterMembers (Configuration _ participants observers) = participants ++ observers
 clusterMembers (JointConfiguration jointOld jointNew) = (clusterMembers jointOld) ++ (clusterMembers jointNew)
+
+clusterMembersOnly :: Configuration -> [ServerId]
+clusterMembersOnly cfg = case clusterLeader cfg of
+    Just ldr -> L.delete ldr (clusterMembers cfg)
+    Nothing -> clusterMembers cfg

@@ -1,4 +1,7 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -16,13 +19,20 @@
 
 module Control.Consensus.Raft.Protocol (
 
+    RaftLogEntry(..),
+
     -- * Basic message types
     AppendEntries(..),
+
     RequestVote(..),
+
+    -- * Client call
+    goPerformCommand,
 
     -- * Leader calls
     goAppendEntries,
     goRequestVote,
+    onPerformCommand,
 
     -- * Member handlers
     onAppendEntries,
@@ -43,7 +53,6 @@ import Data.Log (Index)
 
 -- external imports
 
-import qualified Data.ByteString as B
 import qualified Data.Map as M
 import Data.Serialize
 
@@ -56,6 +65,17 @@ import qualified System.Random as R
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
+data Action = Cfg Configuration | Cmd Message 
+    deriving (Eq,Show,Generic)
+
+instance Serialize Action
+
+data RaftLogEntry =  RaftLogEntry {
+    entryTerm :: Term,
+    entryAction :: Action
+} deriving (Eq,Show,Generic)
+
+instance Serialize RaftLogEntry
 
 data AppendEntries =  AppendEntries {
     aeLeader :: ServerId,
@@ -63,10 +83,32 @@ data AppendEntries =  AppendEntries {
     aePreviousIndex :: Index,
     aePreviousTerm :: Term,
     aeCommittedIndex :: Index,
-    aeEntries :: [(Term,B.ByteString)]
-} deriving (Eq,Show,Generic)
+    aeEntries :: [RaftLogEntry]
+} deriving (Eq,Show)
 
-instance Serialize AppendEntries
+instance Serialize AppendEntries where
+    put entries = do
+        put $ aeLeader entries
+        put $ aeLeaderTerm entries
+        put $ aePreviousIndex entries
+        put $ aePreviousTerm entries
+        put $ aeCommittedIndex entries
+        put $ aeEntries entries
+    get = do
+        leader <- get
+        leaderTerm <- get
+        previousIndex <- get
+        previousTerm <- get
+        committedIndex <- get
+        entries <- get
+        return AppendEntries {
+            aeLeader = leader,
+            aeLeaderTerm = leaderTerm,
+            aePreviousIndex = previousIndex,
+            aePreviousTerm = previousTerm,
+            aeCommittedIndex = committedIndex,
+            aeEntries = entries
+        }
 
 data RequestVote = RequestVote {
         rvCandidate :: ServerId,
@@ -77,28 +119,21 @@ data RequestVote = RequestVote {
 
 instance Serialize RequestVote
 
-data RaftMessage = AppendEntriesRequest AppendEntries
-    | AppendEntriesResponse Term Bool
-    | RequestVoteRequest RequestVote
-    | RequestVoteResponse Term Bool
-    deriving (Eq,Show,Generic)
-
-instance Serialize RaftMessage
-
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
-goAppendEntries :: CallSite -> [Name]
+goAppendEntries :: CallSite
+            -> Name                     -- ^^ Member that is target of the call
             -> ServerId                 -- ^^ Leader
             -> Term                     -- ^^ Leader's current term
-            -> Index                    -- ^^ Log index of entry just priot to the entries being appended
+            -> Index                    -- ^^ Log index of entry just prior to the entries being appended
             -> Term                     -- ^^ Term of entry just priot to the entries being appended
             -> Index                    -- ^^ Last index up to which all entries are committed on leader
-            -> [(Term,B.ByteString)]    -- ^^ Entries to append
-            -> IO (M.Map Name (Maybe (Term,Bool)))
-goAppendEntries cs members leader term prevLogIndex prevTerm commitIndex entries = do
-    gcallWithTimeout cs members methodAppendEntries rpcTimeout
-        $ AppendEntriesRequest $ AppendEntries leader term prevLogIndex prevTerm commitIndex entries
+            -> [RaftLogEntry]    -- ^^ Entries to append
+            -> IO (Maybe (Term,Bool))
+goAppendEntries cs member leader term prevLogIndex prevTerm commitIndex entries = do
+    callWithTimeout cs member methodAppendEntries rpcTimeout
+        $ AppendEntries leader term prevLogIndex prevTerm commitIndex entries
 
 methodRequestVote :: String
 methodRequestVote = "requestVote"
@@ -110,46 +145,54 @@ goRequestVote :: CallSite -> [Name]
                 -> Term     -- ^^ Term of candidate's last entry
                 -> IO (M.Map Name (Maybe (Term,Bool)))
 goRequestVote cs members term candidate lastIndex lastTerm = do
-    gcallWithTimeout cs members methodRequestVote rpcTimeout 
-        $ RequestVoteRequest $ RequestVote candidate term lastIndex lastTerm
+    gcallWithTimeout cs members methodRequestVote rpcTimeout
+        $ RequestVote candidate term lastIndex lastTerm
+
+methodPerformCommand :: String
+methodPerformCommand = "performCommand"
+
+goPerformCommand :: (Serialize a) => CallSite
+                    -> ServerId
+                    -> a
+                    -> IO Index
+goPerformCommand cs member cmd = do
+    index <- call cs member methodPerformCommand cmd
+    return index
 
 {-|
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> (AppendEntries -> IO (Term,Bool)) -> IO Bool
-onAppendEntries endpoint fn = do
-    msg <- selectMessageTimeout endpoint heartbeatTimeout isAppendEntries
+onAppendEntries :: Endpoint -> ServerId -> (AppendEntries -> IO (Term,Bool)) -> IO (Index,Bool)
+onAppendEntries endpoint server fn = do
+    msg <- hearTimeout endpoint server methodAppendEntries heartbeatTimeout
     case msg of
-        Just req -> do
+        Just (req,reply) -> do
             (term,success) <- fn req
-            reply (aeLeader req) term success
-            return True
-        Nothing -> return False
-    where
-        isAppendEntries msg = case decode msg :: Either String RaftMessage of
-                  Right (AppendEntriesRequest req)  ->
-                      Just req
-                  Right _ -> Nothing
-                  Left _ -> Nothing
-        reply leader term sucess = sendMessage_ endpoint leader $ encode $ AppendEntriesResponse term sucess
+            reply (term,success)
+            return (aeCommittedIndex req,True)
+        Nothing -> return (0,False)
 
 {-|
 Wait for an 'RequestVote' RPC to arrive, and process it when it arrives.
 -}
-onRequestVote :: Endpoint -> (RequestVote -> IO (Term,Bool)) -> IO ()
-onRequestVote endpoint fn = do
-    req <- selectMessage endpoint isRequestVote
+onRequestVote :: Endpoint -> ServerId -> (RequestVote -> IO (Term,Bool)) -> IO ()
+onRequestVote endpoint server fn = do
+    (req,reply) <- hear endpoint server methodRequestVote
     (term,success) <- fn req
-    reply (rvCandidate req) term success
+    reply (term,success)
     return ()
-    where
-        isRequestVote msg = case decode msg :: Either String RaftMessage of
-                  Right (RequestVoteRequest req)  ->
-                      Just req
-                  Right _ -> Nothing
-                  Left _ -> Nothing
-        reply leader term sucess = sendMessage_ endpoint leader $ encode $ RequestVoteResponse term sucess
+
+{-|
+Wait for a request from a client to perform a command, and process it when it arrives.
+-}
+onPerformCommand :: (Serialize a) => Endpoint -> ServerId -> (a -> IO Index) -> IO ()
+onPerformCommand endpoint leader fn = do
+    (cmd,reply) <- hear endpoint leader methodPerformCommand
+    index <- fn cmd
+    reply index
+    return ()
+
 --------------------------------------------------------------------------------
 -- Timeouts
 --------------------------------------------------------------------------------
