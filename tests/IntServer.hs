@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 -----------------------------------------------------------------------------
 -- |
--- Module      :  NumberServer
+-- Module      :  IntServer
 -- Copyright   :  (c) Phil Hargett 2014
 -- License     :  MIT (see LICENSE file)
 -- 
@@ -15,9 +15,10 @@
 --
 -----------------------------------------------------------------------------
 
-module NumberServer (
-    NumberLogEntry(..),
-    NumberLog
+module IntServer (
+    IntCommand(..),
+    IntLogEntry(..),
+    IntLog
 ) where
 
 -- local imports
@@ -31,28 +32,37 @@ import Prelude hiding (log)
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-type Action a = a -> a
+data IntCommand = Add Int
+    | Subtract Int
+    | Multiply Int
+    | Divide Int
 
-data NumberLogEntry a = NumberLogEntry {
-    entryAction :: Action a
+applyCommand :: Int -> IntCommand -> Int
+applyCommand initial (Add value) = initial + value
+applyCommand initial (Subtract value) = initial - value
+applyCommand initial (Multiply value) = initial * value
+applyCommand initial (Divide value) = initial `quot` value
+
+data IntLogEntry = IntLogEntry {
+    entryCommand :: IntCommand
 }
 
-data NumberLog = NumberLog {
+data IntLog = IntLog {
     numberLogLastCommittedIndex :: Index,
     numberLogLastAppendedIndex :: Index,
-    numberLogEntries :: [NumberLogEntry Int]
+    numberLogEntries :: [IntLogEntry]
 }
 
-newNumberLog :: IO NumberLog
-newNumberLog = do
-    return NumberLog {
+newIntLog :: IO IntLog
+newIntLog = do
+    return IntLog {
         numberLogLastCommittedIndex = -1,
         numberLogLastAppendedIndex = -1,
         numberLogEntries = []
     }
 
-instance Log NumberLog IO (NumberLogEntry Int) Int where
-    newLog = newNumberLog
+instance Log IntLog IO IntLogEntry Int where
+    newLog = newIntLog
     -- lastCommitted :: l -> m Index
     lastCommitted log = numberLogLastCommittedIndex log
     -- lastAppended :: l -> m Index
@@ -81,11 +91,11 @@ instance Log NumberLog IO (NumberLogEntry Int) Int where
             fetch start count = do
                 let existing = numberLogEntries log
                 return $ take count $ drop start existing
-            -- commit :: Index -> [NumberLogEntry Int] -> Int -> STM Int
+            -- commit :: Index -> [IntLogEntry Int] -> Int -> STM Int
             commit  next [] oldState = do
                 return (log {
                         numberLogLastCommittedIndex = next -1
                     },oldState)
             commit next (entry:rest) oldState = do
-                let newState = (entryAction entry) oldState
+                let newState = applyCommand oldState $ entryCommand entry
                 commit (next + 1) rest newState

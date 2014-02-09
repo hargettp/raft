@@ -208,9 +208,10 @@ lead vRaft endpoint = do
         nextIndex = (lastCommitted $ serverLog $ raftServer raft) + 1
         term = raftCurrentTerm raft
     followers <- mapM (makeFollower term nextIndex) members
-    pulsing <- async $ doPulse vRaft followers
     serving <- async $ doServe endpoint leader vRaft followers
-    _ <- waitAnyCancel $ [pulsing,serving] ++ map followerNotifier followers
+    pulsing <- async $ doPulse vRaft followers
+    voting <- async $ doVote vRaft endpoint leader
+    _ <- waitAnyCancel $ [serving,pulsing,voting] ++ map followerNotifier followers
     return ()
     where
         makeFollower term nextIndex member = do

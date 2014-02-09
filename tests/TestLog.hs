@@ -18,7 +18,7 @@ module TestLog (
 
 -- local imports
 
-import NumberServer
+import IntServer
 
 -- external imports
 
@@ -43,20 +43,20 @@ tests = [
 
 testNewLog :: Assertion
 testNewLog = do
-    _ <- newLog :: IO NumberLog
+    _ <- newLog :: IO IntLog
     return ()
 
 testEmptyLog :: Assertion
 testEmptyLog = do
-    log <- newLog :: IO NumberLog
+    log <- newLog :: IO IntLog
     let val = 0 :: Int
     (_,chg) <- commitEntries log 0 val
     assertEqual "Empty log should leave value unchanged" val chg
 
 testSingleAction :: Assertion
 testSingleAction = do
-    log <- newLog :: IO NumberLog
-    log1 <- appendEntries log 0 [NumberLogEntry (+ 2)]
+    log <- newLog :: IO IntLog
+    log1 <- appendEntries log 0 [IntLogEntry (Add 2)]
     let val = 1 :: Int
     entries <- fetchEntries log1 0 1
     let lastIndex = lastAppended log1
@@ -69,8 +69,8 @@ testSingleAction = do
 
 testDoubleAction :: Assertion
 testDoubleAction = do
-    log <- newLog :: IO NumberLog
-    log1 <- appendEntries log 0 [NumberLogEntry (+ 2),NumberLogEntry ( * 5)]
+    log <- newLog :: IO IntLog
+    log1 <- appendEntries log 0 [IntLogEntry (Add 2),IntLogEntry (Multiply 5)]
     let val = 1
     entries <- fetchEntries log1 0 2
     assertBool "Log should not be empty" (not $ null entries)
