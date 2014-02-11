@@ -1,5 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveGeneric #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  IntServer
@@ -18,16 +19,25 @@
 module IntServer (
     IntCommand(..),
     IntLogEntry(..),
-    IntLog
+    IntLog,
+    newIntLog,
+    newIntServer
 ) where
 
 -- local imports
+
+import Control.Consensus.Raft
+import Control.Consensus.Raft.Types
 
 import Data.Log
 
 -- external imports
 
 import Prelude hiding (log)
+
+import Data.Serialize
+
+import GHC.Generics
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -36,22 +46,37 @@ data IntCommand = Add Int
     | Subtract Int
     | Multiply Int
     | Divide Int
+    deriving (Generic)
 
-applyCommand :: Int -> IntCommand -> Int
-applyCommand initial (Add value) = initial + value
-applyCommand initial (Subtract value) = initial - value
-applyCommand initial (Multiply value) = initial * value
-applyCommand initial (Divide value) = initial `quot` value
+instance Serialize IntCommand
+
+applyAction :: Int -> Action -> Int
+-- TODO fix this later--should be applied to server, not log or state
+applyAction initial (Cfg _) = initial
+applyAction initial (Cmd cmd) = let Right icmd = decode cmd
+                               in applyIntCommand initial icmd
+
+applyIntCommand :: Int -> IntCommand -> Int
+applyIntCommand initial (Add value) = initial + value
+applyIntCommand initial (Subtract value) = initial - value
+applyIntCommand initial (Multiply value) = initial * value
+applyIntCommand initial (Divide value) = initial `quot` value
 
 data IntLogEntry = IntLogEntry {
     entryCommand :: IntCommand
-}
+} deriving (Generic)
+
+instance Serialize IntLogEntry
 
 data IntLog = IntLog {
     numberLogLastCommittedIndex :: Index,
     numberLogLastAppendedIndex :: Index,
-    numberLogEntries :: [IntLogEntry]
+    numberLogEntries :: [RaftLogEntry]
 }
+
+instance LogIO IntLog RaftLogEntry Int
+
+instance RaftLog IntLog Int
 
 newIntLog :: IO IntLog
 newIntLog = do
@@ -61,7 +86,8 @@ newIntLog = do
         numberLogEntries = []
     }
 
-instance Log IntLog IO IntLogEntry Int where
+-- instance Log IntLog IO IntLogEntry Int where
+instance Log IntLog IO RaftLogEntry Int where
     newLog = newIntLog
     -- lastCommitted :: l -> m Index
     lastCommitted log = numberLogLastCommittedIndex log
@@ -97,5 +123,18 @@ instance Log IntLog IO IntLogEntry Int where
                         numberLogLastCommittedIndex = next -1
                     },oldState)
             commit next (entry:rest) oldState = do
-                let newState = applyCommand oldState $ entryCommand entry
+                let newState = applyAction oldState $ entryAction entry
                 commit (next + 1) rest newState
+
+-- type IntServer = Server IntLog IntLogEntry Int
+type IntServer = RaftServer IntLog Int
+
+newIntServer :: Configuration -> ServerId -> Int -> IO IntServer
+newIntServer cfg sid initial = do
+    log <- newIntLog
+    return Server {
+        serverId = sid,
+        serverConfiguration = cfg,
+        serverLog = log,
+        serverState = initial
+    }

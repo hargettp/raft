@@ -18,13 +18,15 @@
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft (
+    RaftServer,
+    RaftLog,
+    RaftLogEntry(..),
     runConsensus
 ) where
 
 -- local imports
 
 import Control.Consensus.Raft.Protocol
-import Control.Consensus.Raft.Server
 import Control.Consensus.Raft.Types
 
 import Data.Log

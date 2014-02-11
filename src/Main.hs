@@ -4,6 +4,7 @@ module Main where
 -- local imports
 
 import qualified TestLog as L
+import qualified TestRaft as R
 
 -- external imports
 
@@ -36,3 +37,4 @@ tests :: [Test.Framework.Test]
 tests = [
     ]
     ++ L.tests
+    ++ R.tests

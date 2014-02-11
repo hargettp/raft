@@ -17,10 +17,15 @@
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft.Types (
+    Action(..),
+    Command,
     Configuration(..),
+        newConfiguration,
         clusterLeader,
         clusterMembers,
         clusterMembersOnly,
+    RaftLogEntry(..),
+    Server(..),
     ServerId,
     Term,
     Timeout
@@ -30,7 +35,9 @@ module Control.Consensus.Raft.Types (
 
 -- external imports
 
+import qualified Data.ByteString as B
 import qualified Data.List as L
+import Data.Log
 import Data.Serialize
 import Data.Typeable
 
@@ -58,13 +65,20 @@ data Configuration = Configuration {
           configurationLeader :: Maybe ServerId,
           configurationParticipants :: [ServerId],
           configurationObservers :: [ServerId]
-          } 
+          }
           | JointConfiguration {
           jointOldConfiguration :: Configuration,
           jointNewConfiguration :: Configuration
           } deriving (Generic,Show,Typeable,Eq)
 
 instance Serialize Configuration
+
+newConfiguration :: [ServerId] -> Configuration
+newConfiguration participants = Configuration {
+    configurationLeader = Nothing,
+    configurationParticipants = participants,
+    configurationObservers = []
+}
 
 clusterLeader :: Configuration -> Maybe ServerId
 clusterLeader Configuration {configurationLeader = leaderId} = leaderId
@@ -78,3 +92,24 @@ clusterMembersOnly :: Configuration -> [ServerId]
 clusterMembersOnly cfg = case clusterLeader cfg of
     Just ldr -> L.delete ldr (clusterMembers cfg)
     Nothing -> clusterMembers cfg
+
+data RaftLogEntry =  RaftLogEntry {
+    entryTerm :: Term,
+    entryAction :: Action
+} deriving (Eq,Show,Generic)
+
+instance Serialize RaftLogEntry
+
+type Command = B.ByteString
+
+data Action = Cfg Configuration | Cmd Command
+    deriving (Eq,Show,Generic)
+
+instance Serialize Action
+
+data Server l e v = (LogIO l e v) => Server {
+    serverId :: ServerId,
+    serverConfiguration :: Configuration,
+    serverLog :: l,
+    serverState :: v
+}

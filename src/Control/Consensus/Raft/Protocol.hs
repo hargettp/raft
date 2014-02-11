@@ -19,8 +19,6 @@
 
 module Control.Consensus.Raft.Protocol (
 
-    RaftLogEntry(..),
-
     -- * Basic message types
     AppendEntries(..),
 
@@ -65,17 +63,6 @@ import qualified System.Random as R
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
-data Action = Cfg Configuration | Cmd Message 
-    deriving (Eq,Show,Generic)
-
-instance Serialize Action
-
-data RaftLogEntry =  RaftLogEntry {
-    entryTerm :: Term,
-    entryAction :: Action
-} deriving (Eq,Show,Generic)
-
-instance Serialize RaftLogEntry
 
 data AppendEntries =  AppendEntries {
     aeLeader :: ServerId,
