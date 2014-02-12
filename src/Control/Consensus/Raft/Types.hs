@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE ExistentialQuantification #-}
@@ -24,7 +26,10 @@ module Control.Consensus.Raft.Types (
         clusterLeader,
         clusterMembers,
         clusterMembersOnly,
+    RaftServer,
+    RaftLog,
     RaftLogEntry(..),
+    RaftState(..),
     Server(..),
     ServerId,
     Term,
@@ -92,6 +97,16 @@ clusterMembersOnly :: Configuration -> [ServerId]
 clusterMembersOnly cfg = case clusterLeader cfg of
     Just ldr -> L.delete ldr (clusterMembers cfg)
     Nothing -> clusterMembers cfg
+
+class (LogIO l RaftLogEntry v) => RaftLog l v
+
+type RaftServer l v = Server l RaftLogEntry v
+
+data RaftState l v = (RaftLog l v) => RaftState {
+    raftCurrentTerm :: Term,
+    raftLastCandidate :: Maybe ServerId,
+    raftServer :: RaftServer l v
+}
 
 data RaftLogEntry =  RaftLogEntry {
     entryTerm :: Term,

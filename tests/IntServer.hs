@@ -26,7 +26,6 @@ module IntServer (
 
 -- local imports
 
-import Control.Consensus.Raft
 import Control.Consensus.Raft.Types
 
 import Data.Log

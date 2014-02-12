@@ -1,7 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -18,9 +16,6 @@
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft (
-    RaftServer,
-    RaftLog,
-    RaftLogEntry(..),
     runConsensus
 ) where
 
@@ -39,7 +34,6 @@ import Control.Exception
 import Control.Concurrent.STM
 
 import qualified Data.Map as M
-import Data.Time
 
 import Network.Endpoints
 import Network.RPC
@@ -54,17 +48,6 @@ import System.Log.Logger
 _log :: String
 _log = "raft.consensus"
 
-class (LogIO l RaftLogEntry v) => RaftLog l v
-
-type RaftServer l v = Server l RaftLogEntry v
-
-data RaftState l v = (RaftLog l v) => RaftState {
-    raftLastUpdate :: UTCTime,
-    raftCurrentTerm :: Term,
-    raftLastCandidate :: Maybe ServerId,
-    raftServer :: RaftServer l v
-}
-
 {-|
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
@@ -75,9 +58,7 @@ runConsensus endpoint server = do
                   ++ " encountered error: " ++ (show (e :: SomeException)))
   where
     run = do
-        now <- getCurrentTime
         raft <- atomically $ newTVar $ RaftState {
-            raftLastUpdate = now,
             raftCurrentTerm = 0,
             raftLastCandidate = Nothing,
             raftServer = server
