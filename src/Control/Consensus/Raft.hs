@@ -1,5 +1,6 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -157,7 +158,7 @@ volunteer vRaft endpoint = do
     raft <- atomically $ do
         modifyTVar vRaft $ \raft -> raft {raftCurrentTerm = (raftCurrentTerm raft) + 1}
         readTVar vRaft
-    let members = clusterMembers $ serverConfiguration $ raftServer raft
+    let members = clusterMembers $ serverConfiguration $ serverState $ raftServer raft
         candidate = serverId $ raftServer raft
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
@@ -186,8 +187,8 @@ lead vRaft endpoint = do
     raft <- atomically $ do
         modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = (raftCurrentTerm oldRaft) + 1}
         readTVar vRaft
-    let members = clusterMembersOnly $ serverConfiguration $ raftServer raft
-        Just leader = clusterLeader $ serverConfiguration $ raftServer raft
+    let members = clusterMembersOnly $ serverConfiguration $ serverState $ raftServer raft
+        Just leader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft
         nextIndex = (lastCommitted $ serverLog $ raftServer raft) + 1
         term = raftCurrentTerm raft
     followers <- mapM (makeFollower term nextIndex) members

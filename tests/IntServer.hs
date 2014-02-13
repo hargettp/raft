@@ -1,5 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -49,17 +50,16 @@ data IntCommand = Add Int
 
 instance Serialize IntCommand
 
-applyAction :: Int -> Action -> Int
--- TODO fix this later--should be applied to server, not log or state
-applyAction initial (Cfg _) = initial
+applyAction :: ServerState Int -> Action -> ServerState Int
+applyAction initial (Cfg cfg) = initial {serverConfiguration = cfg}
 applyAction initial (Cmd cmd) = let Right icmd = decode cmd
                                in applyIntCommand initial icmd
 
-applyIntCommand :: Int -> IntCommand -> Int
-applyIntCommand initial (Add value) = initial + value
-applyIntCommand initial (Subtract value) = initial - value
-applyIntCommand initial (Multiply value) = initial * value
-applyIntCommand initial (Divide value) = initial `quot` value
+applyIntCommand :: ServerState Int -> IntCommand -> ServerState Int
+applyIntCommand initial (Add value) = initial {serverData = (serverData initial) + value}
+applyIntCommand initial (Subtract value) = initial {serverData = (serverData initial) - value}
+applyIntCommand initial (Multiply value) = initial {serverData = (serverData initial) * value}
+applyIntCommand initial (Divide value) = initial {serverData = (serverData initial) `quot` value}
 
 data IntLogEntry = IntLogEntry {
     entryCommand :: IntCommand
@@ -73,7 +73,7 @@ data IntLog = IntLog {
     numberLogEntries :: [RaftLogEntry]
 }
 
-instance LogIO IntLog RaftLogEntry Int
+instance LogIO IntLog RaftLogEntry (ServerState Int)
 
 instance RaftLog IntLog Int
 
@@ -85,25 +85,24 @@ newIntLog = do
         numberLogEntries = []
     }
 
--- instance Log IntLog IO IntLogEntry Int where
-instance Log IntLog IO RaftLogEntry Int where
+instance Log IntLog IO RaftLogEntry (ServerState Int) where
+    
     newLog = newIntLog
-    -- lastCommitted :: l -> m Index
+    
     lastCommitted log = numberLogLastCommittedIndex log
-    -- lastAppended :: l -> m Index
+    
     lastAppended log = numberLogLastAppendedIndex log
-    -- appendEntries :: l -> Index -> [e s] -> m l
+    
     appendEntries log index newEntries = do
         -- TODO cleanup this logic
         return log {
             numberLogLastAppendedIndex = index + (length newEntries) - 1,
             numberLogEntries = (take (index + 1) (numberLogEntries log)) ++ newEntries
         }
-    -- fetchEntries :: l -> Index -> Int -> m [e s]
     fetchEntries log index count = do
         let entries = numberLogEntries log
         return $ take count $ drop index entries
-    -- commitEntries :: l -> Index -> s -> m (l,s)
+    
     commitEntries log index state = do
         let committed = numberLogLastCommittedIndex log
         if index > committed
@@ -116,7 +115,6 @@ instance Log IntLog IO RaftLogEntry Int where
             fetch start count = do
                 let existing = numberLogEntries log
                 return $ take count $ drop start existing
-            -- commit :: Index -> [IntLogEntry Int] -> Int -> STM Int
             commit  next [] oldState = do
                 return (log {
                         numberLogLastCommittedIndex = next -1
@@ -125,7 +123,6 @@ instance Log IntLog IO RaftLogEntry Int where
                 let newState = applyAction oldState $ entryAction entry
                 commit (next + 1) rest newState
 
--- type IntServer = Server IntLog IntLogEntry Int
 type IntServer = RaftServer IntLog Int
 
 newIntServer :: Configuration -> ServerId -> Int -> IO IntServer
@@ -133,7 +130,9 @@ newIntServer cfg sid initial = do
     log <- newIntLog
     return Server {
         serverId = sid,
-        serverConfiguration = cfg,
         serverLog = log,
-        serverState = initial
+        serverState = ServerState {
+            serverConfiguration = cfg,
+            serverData = initial
+            }
     }

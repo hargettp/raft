@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -32,6 +33,7 @@ module Control.Consensus.Raft.Types (
     RaftState(..),
     Server(..),
     ServerId,
+    ServerState(..),
     Term,
     Timeout
 ) where
@@ -98,9 +100,9 @@ clusterMembersOnly cfg = case clusterLeader cfg of
     Just ldr -> L.delete ldr (clusterMembers cfg)
     Nothing -> clusterMembers cfg
 
-class (LogIO l RaftLogEntry v) => RaftLog l v
+class (LogIO l RaftLogEntry (ServerState v)) => RaftLog l v
 
-type RaftServer l v = Server l RaftLogEntry v
+type RaftServer l v = Server l RaftLogEntry (ServerState v)
 
 data RaftState l v = (RaftLog l v) => RaftState {
     raftCurrentTerm :: Term,
@@ -124,7 +126,14 @@ instance Serialize Action
 
 data Server l e v = (LogIO l e v) => Server {
     serverId :: ServerId,
-    serverConfiguration :: Configuration,
     serverLog :: l,
     serverState :: v
 }
+
+data ServerState v = (Eq v,Show v) => ServerState {
+    serverConfiguration :: Configuration,
+    serverData :: v
+}
+
+deriving instance Eq (ServerState v)
+deriving instance Show (ServerState v)
