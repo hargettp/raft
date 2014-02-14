@@ -54,6 +54,10 @@ testCluster = do
     endpoint2 <- newEndpoint [transport]
     endpoint3 <- newEndpoint [transport]
 
+    bindEndpoint_ endpoint1 "server1"
+    bindEndpoint_ endpoint2 "server2"
+    bindEndpoint_ endpoint3 "server3"
+
     server1 <- newIntServer cfg "server1" 0
     server2 <- newIntServer cfg "server2" 0
     server3 <- newIntServer cfg "server3" 0

@@ -55,8 +55,8 @@ takes care of coordinating the transitions among followers, candidates, and lead
 -}
 runConsensus :: (RaftLog l v) => Endpoint -> RaftServer l v -> IO ()
 runConsensus endpoint server = do
-  catch run (\e -> errorM _log $ (show $ serverId server)
-                  ++ " encountered error: " ++ (show (e :: SomeException)))
+  catch run (\e -> do
+                errorM _log $ (show $ serverId server) ++ " encountered error: " ++ (show (e :: SomeException)))
   where
     run = do
         raft <- atomically $ newTVar $ RaftState {
@@ -68,13 +68,17 @@ runConsensus endpoint server = do
         finally (do participate raft)
             (do
                 infoM _log $ "Stopped server " ++ (serverId server) )
-    participate raft= do
-      follow raft endpoint $ serverId server
-      won <- volunteer raft endpoint
-      if won
-        then lead raft endpoint
-        else return ()
-      participate raft
+    participate raft = do
+        infoM _log $ "Server " ++ (serverId server) ++ " following"
+        follow raft endpoint $ serverId server
+        infoM _log $ "Server " ++ (serverId server) ++ " volunteering"
+        won <- volunteer raft endpoint $ serverId server
+        if won
+            then do
+                infoM _log $ "Server " ++ (serverId server) ++ " leading"
+                lead raft endpoint $ serverId server
+            else return ()
+        participate raft
 
 follow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 follow vRaft endpoint name = race_ (doFollow vRaft endpoint name) (doVote vRaft endpoint name)
@@ -92,10 +96,17 @@ doFollow vRaft endpoint member = do
         atomically $ if (aeLeaderTerm req) < (raftCurrentTerm raft)
             then return (raftCurrentTerm raft,False)
             else do
-                -- first update term
+                -- first update term and leader
                 raft1 <- do
                     if (aeLeaderTerm req) > (raftCurrentTerm raft)
-                        then  modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = aeLeaderTerm req}
+                        then  modifyTVar vRaft $ \oldRaft -> oldRaft {
+                            raftCurrentTerm = aeLeaderTerm req,
+                            raftServer = (raftServer oldRaft) {
+                                serverState = (serverState $ raftServer oldRaft) {
+                                    serverConfiguration = (serverConfiguration $ serverState $ raftServer oldRaft) {
+                                        configurationLeader = Just $ aeLeader req
+                                    }}},
+                            raftLastCandidate = Nothing}
                         else return ()
                     readTVar vRaft
                 -- now check that we're in sync
@@ -121,26 +132,32 @@ Wait for request vote requests and process them
 -}
 doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doVote vRaft endpoint name = do
-    onRequestVote endpoint name $ \req -> atomically $ do
-        raft <- readTVar vRaft
-        if (rvCandidateTerm req) < (raftCurrentTerm raft)
-            then return (raftCurrentTerm raft,False)
-            else do
-                if (rvCandidateTerm req) > (raftCurrentTerm raft)
-                    then modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = rvCandidateTerm req}
-                    else return ()
-                raft1 <- readTVar vRaft
-                case raftLastCandidate raft1 of
-                    Just candidate -> do
-                        if Just candidate == raftLastCandidate raft1
-                            then return (raftCurrentTerm raft1,True)
-                            else return (raftCurrentTerm raft1,False)
-                    Nothing -> do
-                        if logOutOfDate raft1 req
-                            then do
-                                modifyTVar vRaft $ \oldRaft -> oldRaft {raftLastCandidate = Just $ rvCandidate req}
-                                return (raftCurrentTerm raft1,True)
-                            else return (raftCurrentTerm raft,False)
+    onRequestVote endpoint name $ \req -> do
+        -- infoM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
+        (term,vote) <- atomically $ do
+            raft <- readTVar vRaft
+            if (rvCandidateTerm req) < (raftCurrentTerm raft)
+                then return (raftCurrentTerm raft,False)
+                else do
+                    raft1 <- readTVar vRaft
+                    case raftLastCandidate raft1 of
+                        Just candidate -> do
+                            if candidate == rvCandidate req
+                                then return (raftCurrentTerm raft1,True)
+                                else return (raftCurrentTerm raft1,False)
+                        Nothing -> do
+                            if logOutOfDate raft1 req
+                                then do
+                                    modifyTVar vRaft $ \oldRaft -> oldRaft {
+                                        raftCurrentTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
+                                            then rvCandidateTerm req
+                                            else (raftCurrentTerm oldRaft),
+                                        raftLastCandidate = Just $ rvCandidate req}
+                                    return (raftCurrentTerm raft1,True)
+                                else return (raftCurrentTerm raft1,False)
+        -- raft <- atomically $ readTVar vRaft
+        -- infoM _log $ "Server " ++ name ++ "(" ++ (show $ raftCurrentTerm raft) ++ ") vote for " ++ rvCandidate req ++ " is " ++ (show (term,vote))
+        return (term,vote)
     doVote vRaft endpoint name
     where
         -- check that candidate log is more up to date than this server's log
@@ -148,29 +165,39 @@ doVote vRaft endpoint name = do
                                 then True
                                 else if (rvCandidateLastEntryTerm req) < (raftCurrentTerm raft)
                                     then False
-                                    else (lastAppended $ serverLog $ raftServer raft) < (rvCandidateLastEntryIndex req)
+                                    else (lastAppended $ serverLog $ raftServer raft) <= (rvCandidateLastEntryIndex req)
 
 {-|
 Initiate an election, volunteering to lead the cluster if elected.
 -}
-volunteer :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> IO Bool
-volunteer vRaft endpoint = do
+volunteer :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO Bool
+volunteer vRaft endpoint name = do
+    results <- race (doVote vRaft endpoint name) (doVolunteer vRaft endpoint name)
+    case results of
+        Left _ -> return False
+        Right won -> return won
+
+doVolunteer :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO Bool
+doVolunteer vRaft endpoint candidate = do
     raft <- atomically $ do
-        modifyTVar vRaft $ \raft -> raft {raftCurrentTerm = (raftCurrentTerm raft) + 1}
+        modifyTVar vRaft $ \raft -> raft {
+            raftCurrentTerm = (raftCurrentTerm raft) + 1,
+            raftLastCandidate = Nothing}
         readTVar vRaft
     let members = clusterMembers $ serverConfiguration $ serverState $ raftServer raft
-        candidate = serverId $ raftServer raft
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
         log = serverLog $ raftServer raft
         lastIndex = lastAppended log
     lastEntries <- fetchEntries log lastIndex 1
-    case lastEntries of
-        (entry:[]) -> do
-            let lastTerm = entryTerm entry
-            votes <- goRequestVote cs members term candidate lastIndex lastTerm
-            return $ wonElection votes
-        _ -> return False
+    let lastTerm = case lastEntries of
+            (entry:[]) -> entryTerm entry
+            (_:entries) -> entryTerm $ last entries
+            _ -> 0
+    -- infoM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
+    votes <- goRequestVote cs members term candidate lastIndex lastTerm
+    infoM _log $ "Server " ++ candidate ++ " received votes " ++ (show votes)
+    return $ wonElection votes
     where
         wonElection :: M.Map Name (Maybe (Term,Bool)) -> Bool
         wonElection votes = majority votes $ M.foldl (\tally ballot -> 
@@ -182,13 +209,20 @@ volunteer vRaft endpoint = do
         majority :: M.Map Name (Maybe (Term,Bool)) -> Int -> Bool
         majority votes tally = tally > ((M.size $ votes) `quot` 2)
 
-lead :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> IO ()
-lead vRaft endpoint = do
+lead :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
+lead vRaft endpoint name = do
     raft <- atomically $ do
-        modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = (raftCurrentTerm oldRaft) + 1}
+        modifyTVar vRaft $ \oldRaft -> oldRaft {
+            raftCurrentTerm = (raftCurrentTerm oldRaft) + 1,
+            raftServer = (raftServer oldRaft) {
+                serverState = (serverState $ raftServer oldRaft) {
+                    serverConfiguration = (serverConfiguration $ serverState $ raftServer oldRaft) {
+                        configurationLeader = Just name
+                    }}},
+            raftLastCandidate = Nothing}
         readTVar vRaft
     let members = clusterMembersOnly $ serverConfiguration $ serverState $ raftServer raft
-        Just leader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft
+        leader = name
         nextIndex = (lastCommitted $ serverLog $ raftServer raft) + 1
         term = raftCurrentTerm raft
     followers <- mapM (makeFollower term nextIndex) members

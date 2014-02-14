@@ -30,7 +30,7 @@ initLogging = do
     then removeFile logFile
     else return ()
   s <- fileHandler logFile INFO
-  updateGlobalLogger rootLoggerName (setLevel WARNING)
+  updateGlobalLogger rootLoggerName (setLevel INFO)
   updateGlobalLogger rootLoggerName (addHandler s)
 
 tests :: [Test.Framework.Test]
