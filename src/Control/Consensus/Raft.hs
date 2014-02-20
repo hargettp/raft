@@ -61,7 +61,9 @@ runConsensus endpoint server = do
         raftServer = server
     }
     catch (run vRaft) (\e -> do
-                errorM _log $ (show $ serverId server) ++ " encountered error: " ++ (show (e :: SomeException)))
+                case e of
+                    ThreadKilled -> return ()
+                    _ -> debugM _log $ (show $ serverId server) ++ " encountered error: " ++ (show (e :: AsyncException)))
     raft <- atomically $ readTVar vRaft
     return $ raftServer raft
     where

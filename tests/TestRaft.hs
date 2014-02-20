@@ -26,6 +26,7 @@ import IntServer
 
 import Prelude hiding (log)
 
+import Control.Applicative
 import Control.Consensus.Raft
 import Control.Concurrent
 import Control.Concurrent.Async
@@ -62,14 +63,37 @@ testCluster = do
     server2 <- newIntServer cfg "server2" 0
     server3 <- newIntServer cfg "server3" 0
 
-    async1 <- async $ runConsensus endpoint1 server1
-    async2 <- async $ runConsensus endpoint2 server2
-    async3 <- async $ runConsensus endpoint3 server3
+    {-
+    async1 <- runFor serverTimeout $ runConsensus endpoint1 server1
+    async2 <- runFor serverTimeout $ runConsensus endpoint2 server2
+    async3 <- runFor serverTimeout $ runConsensus endpoint3 server3
     sleep <- async $ do
         threadDelay 2000000
         return server1
     _ <- waitAnyCancel [sleep,async1,async2,async3]
-
+    -}
+    -- (_,_,_) <- runConcurrently $ (,,)
+    (result1,result2,result3) <- runConcurrently $ (,,)
+        <$> Concurrently (runFor serverTimeout $ runConsensus endpoint1 server1)
+        <*> Concurrently (runFor serverTimeout $ runConsensus endpoint2 server2)
+        <*> Concurrently (runFor serverTimeout $ runConsensus endpoint3 server3)
+    let results = map (\result -> serverData $ serverState result) [result1,result2,result3]
+    -- all results should be equal--and since we didn't perform any commands, should still be 0
+    assert $ all (\result -> result == 0) results
     return ()
+
+serverTimeout :: Timeout
+serverTimeout = 2000000
+
+{-|
+Utility for running a server only for a defined period of time
+-}
+runFor :: Timeout -> IO a -> IO a
+runFor timeout action = do
+    actionAsync <- async action
+    threadDelay timeout
+    cancel actionAsync
+    wait actionAsync
+
 
 
