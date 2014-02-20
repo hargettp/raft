@@ -266,6 +266,8 @@ lead vRaft endpoint name = do
                 Nothing -> notify term lastIndex member
                 Just (memberTerm,success) -> if memberTerm > term
                         then do
+                            -- TODO this doesn't feel atomic enough
+                            atomically $ modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = memberTerm}
                             debugM _log $ "Leader " ++ name ++ " has lower term than member " ++ member
                             return ()
                         else if success
