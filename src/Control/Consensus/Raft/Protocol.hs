@@ -189,20 +189,19 @@ Expected delay (in microseconds) for group rpc's to complete
 -}
 rpcTimeout :: Timeout
 rpcTimeout = (50 * 1000)
--- rpcTimeout = (2000 * 1000)
 
 {-|
 Expected delay (in microseconds) between heartbeats
 -}
 heartbeatTimeout :: Timeout
-heartbeatTimeout = (75 * 1000)
+heartbeatTimeout = (4 * rpcTimeout)
 
 {-|
 Maximum delay leader waits for a new message to process before
 preparing heartbeat
 -}
 pulseTimeout :: Timeout
-pulseTimeout = (50 * 1000)
+pulseTimeout = (3 * rpcTimeout)
 
 {-|
 Range for choosing an election timeout

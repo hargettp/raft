@@ -65,7 +65,9 @@ testCluster = do
     async1 <- async $ runConsensus endpoint1 server1
     async2 <- async $ runConsensus endpoint2 server2
     async3 <- async $ runConsensus endpoint3 server3
-    sleep <- async $ threadDelay 1000000
+    sleep <- async $ do
+        threadDelay 2000000
+        return server1
     _ <- waitAnyCancel [sleep,async1,async2,async3]
 
     return ()

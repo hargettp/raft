@@ -53,35 +53,39 @@ _log = "raft.consensus"
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-runConsensus :: (RaftLog l v) => Endpoint -> RaftServer l v -> IO ()
+runConsensus :: (RaftLog l v) => Endpoint -> RaftServer l v -> IO (RaftServer l v)
 runConsensus endpoint server = do
-  catch run (\e -> do
+    vRaft <- atomically $ newTVar $ RaftState {
+        raftCurrentTerm = 0,
+        raftLastCandidate = Nothing,
+        raftServer = server
+    }
+    catch (run vRaft) (\e -> do
                 errorM _log $ (show $ serverId server) ++ " encountered error: " ++ (show (e :: SomeException)))
-  where
-    run = do
-        raft <- atomically $ newTVar $ RaftState {
-            raftCurrentTerm = 0,
-            raftLastCandidate = Nothing,
-            raftServer = server
-        }
-        infoM _log $ "Starting server " ++ (serverId server)
-        finally (do participate raft)
-            (do
-                infoM _log $ "Stopped server " ++ (serverId server) )
-    participate raft = do
-        infoM _log $ "Server " ++ (serverId server) ++ " following"
-        follow raft endpoint $ serverId server
-        infoM _log $ "Server " ++ (serverId server) ++ " volunteering"
-        won <- volunteer raft endpoint $ serverId server
-        if won
-            then do
-                infoM _log $ "Server " ++ (serverId server) ++ " leading"
-                lead raft endpoint $ serverId server
-            else return ()
-        participate raft
+    raft <- atomically $ readTVar vRaft
+    return $ raftServer raft
+    where
+        run vRaft = do
+            infoM _log $ "Starting server " ++ (serverId server)
+            finally (do participate vRaft)
+                (do
+                    infoM _log $ "Stopped server " ++ (serverId server) )
+        participate vRaft = do
+            term <- atomically $ do
+                raft <- readTVar vRaft
+                return $ raftCurrentTerm raft
+            infoM _log $ "Server " ++ (serverId server) ++ " following " ++ " in term " ++ (show term)
+            follow vRaft endpoint $ serverId server
+            won <- volunteer vRaft endpoint $ serverId server
+            if won
+                then do
+                    lead vRaft endpoint $ serverId server
+                else return ()
+            participate vRaft
 
 follow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
-follow vRaft endpoint name = race_ (doFollow vRaft endpoint name) (doVote vRaft endpoint name)
+follow vRaft endpoint name = do
+    race_ (doFollow vRaft endpoint name) (doVote vRaft endpoint name)
 
 {-|
     Wait for 'AppendEntries' requests and process them, commit new changes
@@ -90,6 +94,7 @@ follow vRaft endpoint name = race_ (doFollow vRaft endpoint name) (doVote vRaft 
 doFollow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doFollow vRaft endpoint member = do
     (committed,success) <- onAppendEntries endpoint member $ \req -> do
+        debugM _log $ "Server " ++ member ++ " received AppendEntries " ++ (show req)
         raft <- atomically $ readTVar vRaft
         -- grab these entries, because we can't do so inside the transaction
         entries <- fetchEntries (serverLog $ raftServer raft) (aePreviousIndex req) 1
@@ -111,7 +116,8 @@ doFollow vRaft endpoint member = do
                     readTVar vRaft
                 -- now check that we're in sync
                 case entries of
-                    [] -> return (raftCurrentTerm raft1,False)
+                    -- we can only have an empty list if we are at the beginning of the log
+                    [] -> return (raftCurrentTerm raft1,-1 == aePreviousIndex req)
                     (entry:_) -> let term = raftCurrentTerm raft1
                                      in return (term,(term == (entryTerm entry)))
     if success
@@ -121,7 +127,7 @@ doFollow vRaft endpoint member = do
             -- being synchronous, so no additional locking required
             raft <- atomically $ readTVar vRaft
             (log,state) <- commitEntries (serverLog $ raftServer $ raft) committed (serverState $ raftServer $ raft)
-            atomically $ modifyTVar vRaft $ \oldRaft -> 
+            atomically $ modifyTVar vRaft $ \oldRaft ->
                         let oldServer = raftServer oldRaft
                             in oldRaft {raftServer = oldServer {serverLog = log,serverState = state} }
             doFollow vRaft endpoint member
@@ -133,30 +139,31 @@ Wait for request vote requests and process them
 doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doVote vRaft endpoint name = do
     onRequestVote endpoint name $ \req -> do
-        -- infoM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
-        (term,vote) <- atomically $ do
+        debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
+        (term,vote,reason) <- atomically $ do
             raft <- readTVar vRaft
             if (rvCandidateTerm req) < (raftCurrentTerm raft)
-                then return (raftCurrentTerm raft,False)
+                then return (raftCurrentTerm raft,False,"Candidate term too old")
                 else do
-                    raft1 <- readTVar vRaft
-                    case raftLastCandidate raft1 of
+                    case raftLastCandidate raft of
                         Just candidate -> do
-                            if candidate == rvCandidate req
-                                then return (raftCurrentTerm raft1,True)
-                                else return (raftCurrentTerm raft1,False)
+                            if (candidate == rvCandidate req)
+                                then return (raftCurrentTerm raft,True,"Candidate already seen")
+                                else return (raftCurrentTerm raft,False,"Already saw different candidate")
                         Nothing -> do
-                            if logOutOfDate raft1 req
-                                then do
-                                    modifyTVar vRaft $ \oldRaft -> oldRaft {
-                                        raftCurrentTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
-                                            then rvCandidateTerm req
-                                            else (raftCurrentTerm oldRaft),
-                                        raftLastCandidate = Just $ rvCandidate req}
-                                    return (raftCurrentTerm raft1,True)
-                                else return (raftCurrentTerm raft1,False)
+                            if name == rvCandidate req
+                                then return (raftCurrentTerm raft,True,"Voting for self")
+                                else if logOutOfDate raft req
+                                    then do
+                                        modifyTVar vRaft $ \oldRaft -> oldRaft {
+                                            raftCurrentTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
+                                                then rvCandidateTerm req
+                                                else (raftCurrentTerm oldRaft),
+                                            raftLastCandidate = Just $ rvCandidate req}
+                                        return (raftCurrentTerm raft,True,"Candidate log more up to date")
+                                    else return (raftCurrentTerm raft,False,"Candidate log out of date")
         -- raft <- atomically $ readTVar vRaft
-        -- infoM _log $ "Server " ++ name ++ "(" ++ (show $ raftCurrentTerm raft) ++ ") vote for " ++ rvCandidate req ++ " is " ++ (show (term,vote))
+        debugM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (term,vote)) ++ " because " ++ reason
         return (term,vote)
     doVote vRaft endpoint name
     where
@@ -184,6 +191,7 @@ doVolunteer vRaft endpoint candidate = do
             raftCurrentTerm = (raftCurrentTerm raft) + 1,
             raftLastCandidate = Nothing}
         readTVar vRaft
+    infoM _log $ "Server " ++ candidate ++ " volunteering in term " ++ (show $ raftCurrentTerm raft)
     let members = clusterMembers $ serverConfiguration $ serverState $ raftServer raft
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
@@ -194,9 +202,9 @@ doVolunteer vRaft endpoint candidate = do
             (entry:[]) -> entryTerm entry
             (_:entries) -> entryTerm $ last entries
             _ -> 0
-    -- infoM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
+    debugM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
     votes <- goRequestVote cs members term candidate lastIndex lastTerm
-    infoM _log $ "Server " ++ candidate ++ " received votes " ++ (show votes)
+    debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)
     return $ wonElection votes
     where
         wonElection :: M.Map Name (Maybe (Term,Bool)) -> Bool
@@ -223,23 +231,23 @@ lead vRaft endpoint name = do
         readTVar vRaft
     let members = clusterMembersOnly $ serverConfiguration $ serverState $ raftServer raft
         leader = name
-        nextIndex = (lastCommitted $ serverLog $ raftServer raft) + 1
         term = raftCurrentTerm raft
-    followers <- mapM (makeFollower term nextIndex) members
+    infoM _log $ "Server " ++ name ++ " leading in new term " ++ (show term)
+    followers <- mapM (makeFollower term) members
     serving <- async $ doServe endpoint leader vRaft followers
-    pulsing <- async $ doPulse vRaft followers
+    pulsing <- async $ doPulse vRaft leader followers
     voting <- async $ doVote vRaft endpoint leader
-    _ <- waitAnyCancel $ [serving,pulsing,voting] ++ map followerNotifier followers
+    _ <- waitAnyCancel $ [pulsing,serving,voting] ++ map followerNotifier followers
     return ()
     where
-        makeFollower term nextIndex member = do
+        makeFollower term member = do
             lastIndex <- atomically $ newEmptyTMVar
-            notifier <- async $ notify term lastIndex nextIndex member
+            notifier <- async $ notify term lastIndex member
             return Follower {
                 followerLastIndex = lastIndex,
                 followerNotifier = notifier
             }
-        notify term lastIndex nextIndex member= do
+        notify term lastIndex member= do
             index <- atomically $ takeTMVar lastIndex
             raft <- atomically $ readTVar vRaft
             let server = raftServer raft
@@ -255,21 +263,29 @@ lead vRaft endpoint name = do
                 _ -> let prevTerm = entryTerm $ last previousEntries
                                      in goAppendEntries cs member leader term prevLogIndex prevTerm index entries
             case response of
-                Nothing -> notify term lastIndex nextIndex member
+                Nothing -> notify term lastIndex member
                 Just (memberTerm,success) -> if memberTerm > term
-                        then return ()
+                        then do
+                            -- TODO this doesn't feel atomic enough
+                            atomically $ modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = memberTerm}
+                            debugM _log $ "Leader " ++ name ++ " has lower term than member " ++ member
+                            return ()
                         else if success
-                            then notify term lastIndex (nextIndex + 1) member
-                            else notify term lastIndex (nextIndex - 1) member
+                            -- TODO figure these calls out
+                            then notify term lastIndex member
+                            else notify term lastIndex member
             return ()
 
-doPulse :: (RaftLog l v) => TVar (RaftState l v) -> [Follower] -> IO ()
-doPulse vRaft followers = do
-    threadDelay heartbeatTimeout
+doPulse :: (RaftLog l v) => TVar (RaftState l v) -> ServerId -> [Follower] -> IO ()
+doPulse vRaft name followers = do
     raft <- atomically $ readTVar vRaft
-    let index = lastCommitted $ serverLog $ raftServer raft
-    mapM_ (pulse index) followers
-    doPulse vRaft followers
+    if Just name == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
+        then do
+            let index = lastCommitted $ serverLog $ raftServer raft
+            mapM_ (pulse index) followers
+            threadDelay pulseTimeout
+            doPulse vRaft name followers
+        else return ()
     where
         pulse index follower = atomically $ do
             _ <- tryPutTMVar (followerLastIndex follower) index
