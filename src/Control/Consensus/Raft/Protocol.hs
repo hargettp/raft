@@ -25,12 +25,12 @@ module Control.Consensus.Raft.Protocol (
     RequestVote(..),
 
     -- * Client call
-    goPerformCommand,
+    goPerformAction,
 
     -- * Leader calls
     goAppendEntries,
     goRequestVote,
-    onPerformCommand,
+    onPerformAction,
 
     -- * Member handlers
     onAppendEntries,
@@ -135,15 +135,15 @@ goRequestVote cs members term candidate lastIndex lastTerm = do
     gcallWithTimeout cs members methodRequestVote rpcTimeout
         $ RequestVote candidate term lastIndex lastTerm
 
-methodPerformCommand :: String
-methodPerformCommand = "performCommand"
+methodPerformAction :: String
+methodPerformAction = "performCommand"
 
-goPerformCommand :: (Serialize a) => CallSite
+goPerformAction :: CallSite
                     -> ServerId
-                    -> a
+                    -> Action
                     -> IO Index
-goPerformCommand cs member cmd = do
-    index <- call cs member methodPerformCommand cmd
+goPerformAction cs member cmd = do
+    index <- call cs member methodPerformAction cmd
     return index
 
 {-|
@@ -171,11 +171,11 @@ onRequestVote endpoint server fn = do
     return ()
 
 {-|
-Wait for a request from a client to perform a command, and process it when it arrives.
+Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformCommand :: (Serialize a) => Endpoint -> ServerId -> (a -> IO Index) -> IO ()
-onPerformCommand endpoint leader fn = do
-    (cmd,reply) <- hear endpoint leader methodPerformCommand
+onPerformAction :: Endpoint -> ServerId -> (Action -> IO Index) -> IO ()
+onPerformAction endpoint leader fn = do
+    (cmd,reply) <- hear endpoint leader methodPerformAction
     index <- fn cmd
     reply index
     return ()

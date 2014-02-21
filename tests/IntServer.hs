@@ -51,9 +51,11 @@ data IntCommand = Add Int
 instance Serialize IntCommand
 
 applyAction :: ServerState Int -> Action -> ServerState Int
-applyAction initial (Cfg cfg) = initial {serverConfiguration = cfg}
 applyAction initial (Cmd cmd) = let Right icmd = decode cmd
                                in applyIntCommand initial icmd
+applyAction initial action = initial {
+    serverConfiguration = applyConfigurationAction (serverConfiguration initial) action
+    }
 
 applyIntCommand :: ServerState Int -> IntCommand -> ServerState Int
 applyIntCommand initial (Add value) = initial {serverData = (serverData initial) + value}

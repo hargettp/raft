@@ -106,24 +106,15 @@ doFollow vRaft endpoint member = do
                 -- first update term and leader
                 raft1 <- do
                     if (aeLeaderTerm req) > (raftCurrentTerm raft)
-                        then  modifyTVar vRaft $ \oldRaft -> oldRaft {
-                            raftCurrentTerm = aeLeaderTerm req,
-                            raftServer = (raftServer oldRaft) {
-                                serverState = (serverState $ raftServer oldRaft) {
-                                    serverConfiguration = (serverConfiguration $ serverState $ raftServer oldRaft) {
-                                        configurationLeader = Just $ aeLeader req
-                                    }}},
-                            raftLastCandidate = Nothing}
+                        then  modifyTVar vRaft $ \oldRaft ->
+                            changeRaftTerm (aeLeaderTerm req)
+                                $ changeRaftLeader (Just $ aeLeader req)
+                                $ changeRaftLastCandidate Nothing oldRaft
                         else if ((aeLeaderTerm req) == (raftCurrentTerm raft)) && 
                                     Nothing == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
-                            then modifyTVar vRaft $ \oldRaft -> oldRaft {
-                                -- only modify leadership
-                                raftServer = (raftServer oldRaft) {
-                                    serverState = (serverState $ raftServer oldRaft) {
-                                        serverConfiguration = (serverConfiguration $ serverState $ raftServer oldRaft) {
-                                            configurationLeader = Just $ aeLeader req
-                                        }}},
-                            raftLastCandidate = Nothing}
+                            then modifyTVar vRaft $ \oldRaft -> 
+                                changeRaftLeader (Just $ aeLeader req)
+                                    $ changeRaftLastCandidate Nothing oldRaft
                             else return ()
                     readTVar vRaft
                 -- now check that we're in sync
@@ -167,11 +158,12 @@ doVote vRaft endpoint name = do
                                 then return (raftCurrentTerm raft,True,"Voting for self")
                                 else if logOutOfDate raft req
                                     then do
-                                        modifyTVar vRaft $ \oldRaft -> oldRaft {
-                                            raftCurrentTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
+                                        modifyTVar vRaft $ \oldRaft -> 
+                                            let newTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
                                                 then rvCandidateTerm req
-                                                else (raftCurrentTerm oldRaft),
-                                            raftLastCandidate = Just $ rvCandidate req}
+                                                else (raftCurrentTerm oldRaft)
+                                            in changeRaftTerm newTerm
+                                                $ changeRaftLastCandidate (Just $ rvCandidate req) oldRaft
                                         return (raftCurrentTerm raft,True,"Candidate log more up to date")
                                     else return (raftCurrentTerm raft,False,"Candidate log out of date")
         -- raft <- atomically $ readTVar vRaft
@@ -199,9 +191,9 @@ volunteer vRaft endpoint name = do
 doVolunteer :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO Bool
 doVolunteer vRaft endpoint candidate = do
     raft <- atomically $ do
-        modifyTVar vRaft $ \raft -> raft {
-            raftCurrentTerm = (raftCurrentTerm raft) + 1,
-            raftLastCandidate = Nothing}
+        modifyTVar vRaft $ \oldRaft ->
+            changeRaftTerm ((raftCurrentTerm oldRaft) + 1)
+                $ changeRaftLastCandidate Nothing oldRaft
         readTVar vRaft
     infoM _log $ "Server " ++ candidate ++ " volunteering in term " ++ (show $ raftCurrentTerm raft)
     let members = clusterMembers $ serverConfiguration $ serverState $ raftServer raft
@@ -232,14 +224,10 @@ doVolunteer vRaft endpoint candidate = do
 lead :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 lead vRaft endpoint name = do
     raft <- atomically $ do
-        modifyTVar vRaft $ \oldRaft -> oldRaft {
-            raftCurrentTerm = (raftCurrentTerm oldRaft) + 1,
-            raftServer = (raftServer oldRaft) {
-                serverState = (serverState $ raftServer oldRaft) {
-                    serverConfiguration = (serverConfiguration $ serverState $ raftServer oldRaft) {
-                        configurationLeader = Just name
-                    }}},
-            raftLastCandidate = Nothing}
+        modifyTVar vRaft $ \oldRaft ->
+            changeRaftTerm ((raftCurrentTerm oldRaft) + 1)
+                $ changeRaftLeader (Just name)
+                $ changeRaftLastCandidate Nothing oldRaft
         readTVar vRaft
     let members = clusterMembersOnly $ serverConfiguration $ serverState $ raftServer raft
         leader = name
@@ -305,7 +293,7 @@ doPulse vRaft name followers = do
 
 doServe :: (RaftLog l v) => Endpoint -> ServerId -> TVar (RaftState l v) -> [Follower] -> IO ()
 doServe endpoint leader vRaft followers = do
-    -- onPerformCommand endpoint leader $ cmd -> do
+    -- onPerformAction endpoint leader $ action -> do
     doServe endpoint leader vRaft followers
 
 data Follower = Follower {
