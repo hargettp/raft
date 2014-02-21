@@ -63,27 +63,20 @@ testCluster = do
     server2 <- newIntServer cfg "server2" 0
     server3 <- newIntServer cfg "server3" 0
 
-    {-
-    async1 <- runFor serverTimeout $ runConsensus endpoint1 server1
-    async2 <- runFor serverTimeout $ runConsensus endpoint2 server2
-    async3 <- runFor serverTimeout $ runConsensus endpoint3 server3
-    sleep <- async $ do
-        threadDelay 2000000
-        return server1
-    _ <- waitAnyCancel [sleep,async1,async2,async3]
-    -}
-    -- (_,_,_) <- runConcurrently $ (,,)
     (result1,result2,result3) <- runConcurrently $ (,,)
         <$> Concurrently (runFor serverTimeout $ runConsensus endpoint1 server1)
         <*> Concurrently (runFor serverTimeout $ runConsensus endpoint2 server2)
         <*> Concurrently (runFor serverTimeout $ runConsensus endpoint3 server3)
-    let results = map (\result -> serverData $ serverState result) [result1,result2,result3]
+    let servers = [result1,result2,result3]
+        leaders = map (clusterLeader . serverConfiguration . serverState) servers
+        results = map (serverData . serverState)  servers
     -- all results should be equal--and since we didn't perform any commands, should still be 0
-    assert $ all (\result -> result == 0) results
+    assertBool "All results should be equal" $ all (== 0) results
+    assertBool ("All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
     return ()
 
 serverTimeout :: Timeout
-serverTimeout = 2000000
+serverTimeout = 2 * 1000000
 
 {-|
 Utility for running a server only for a defined period of time

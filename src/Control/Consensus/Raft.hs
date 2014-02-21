@@ -73,10 +73,6 @@ runConsensus endpoint server = do
                 (do
                     infoM _log $ "Stopped server " ++ (serverId server) )
         participate vRaft = do
-            term <- atomically $ do
-                raft <- readTVar vRaft
-                return $ raftCurrentTerm raft
-            infoM _log $ "Server " ++ (serverId server) ++ " following " ++ " in term " ++ (show term)
             follow vRaft endpoint $ serverId server
             won <- volunteer vRaft endpoint $ serverId server
             if won
@@ -87,6 +83,10 @@ runConsensus endpoint server = do
 
 follow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 follow vRaft endpoint name = do
+    term <- atomically $ do
+        raft <- readTVar vRaft
+        return $ raftCurrentTerm raft
+    infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
     race_ (doFollow vRaft endpoint name) (doVote vRaft endpoint name)
 
 {-|
@@ -114,7 +114,17 @@ doFollow vRaft endpoint member = do
                                         configurationLeader = Just $ aeLeader req
                                     }}},
                             raftLastCandidate = Nothing}
-                        else return ()
+                        else if ((aeLeaderTerm req) == (raftCurrentTerm raft)) && 
+                                    Nothing == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
+                            then modifyTVar vRaft $ \oldRaft -> oldRaft {
+                                -- only modify leadership
+                                raftServer = (raftServer oldRaft) {
+                                    serverState = (serverState $ raftServer oldRaft) {
+                                        serverConfiguration = (serverConfiguration $ serverState $ raftServer oldRaft) {
+                                            configurationLeader = Just $ aeLeader req
+                                        }}},
+                            raftLastCandidate = Nothing}
+                            else return ()
                     readTVar vRaft
                 -- now check that we're in sync
                 case entries of
