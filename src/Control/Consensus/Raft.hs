@@ -87,7 +87,7 @@ follow vRaft endpoint name = do
         raft <- readTVar vRaft
         return $ raftCurrentTerm raft
     infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
-    race_ (doFollow vRaft endpoint name) (doVote vRaft endpoint name)
+    raceAll_ [doFollow vRaft endpoint name, doVote vRaft endpoint name]
 
 {-|
     Wait for 'AppendEntries' requests and process them, commit new changes
@@ -234,18 +234,16 @@ lead vRaft endpoint name = do
         term = raftCurrentTerm raft
     infoM _log $ "Server " ++ name ++ " leading in new term " ++ (show term)
     followers <- mapM (makeFollower term) members
-    serving <- async $ doServe endpoint leader vRaft followers
-    pulsing <- async $ doPulse vRaft leader followers
-    voting <- async $ doVote vRaft endpoint leader
-    _ <- waitAnyCancel $ [pulsing,serving,voting] ++ map followerNotifier followers
-    return ()
+    raceAll_ $ [doPulse vRaft leader followers,
+                    doServe endpoint leader vRaft followers,
+                    doVote vRaft endpoint leader]
+                ++ map followerNotifier followers
     where
         makeFollower term member = do
             lastIndex <- atomically $ newEmptyTMVar
-            notifier <- async $ notify term lastIndex member
             return Follower {
                 followerLastIndex = lastIndex,
-                followerNotifier = notifier
+                followerNotifier = notify term lastIndex member
             }
         notify term lastIndex member= do
             index <- atomically $ takeTMVar lastIndex
@@ -298,5 +296,11 @@ doServe endpoint leader vRaft followers = do
 
 data Follower = Follower {
     followerLastIndex :: TMVar Index,
-    followerNotifier :: Async ()
+    followerNotifier :: IO ()
 }
+
+raceAll_ :: [IO ()] -> IO ()
+raceAll_ actions = do
+    tasks <- mapM async actions
+    _ <- waitAnyCancel tasks
+    return ()
