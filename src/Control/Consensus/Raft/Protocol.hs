@@ -136,12 +136,12 @@ goRequestVote cs members term candidate lastIndex lastTerm = do
         $ RequestVote candidate term lastIndex lastTerm
 
 methodPerformAction :: String
-methodPerformAction = "performCommand"
+methodPerformAction = "performAction"
 
 goPerformAction :: CallSite
                     -> ServerId
                     -> Action
-                    -> IO Index
+                    -> IO (Either (Maybe ServerId) Index)
 goPerformAction cs member cmd = do
     index <- call cs member methodPerformAction cmd
     return index
@@ -173,11 +173,11 @@ onRequestVote endpoint server fn = do
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: Endpoint -> ServerId -> (Action -> IO Index) -> IO ()
+onPerformAction :: Endpoint -> ServerId -> (Action -> IO (Either (Maybe ServerId) Index)) -> IO ()
 onPerformAction endpoint leader fn = do
     (cmd,reply) <- hear endpoint leader methodPerformAction
-    index <- fn cmd
-    reply index
+    response <- fn cmd
+    reply response
     return ()
 
 --------------------------------------------------------------------------------

@@ -73,6 +73,7 @@ testCluster = do
     -- all results should be equal--and since we didn't perform any commands, should still be 0
     assertBool "All results should be equal" $ all (== 0) results
     assertBool ("All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
+    assertBool ("There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
     return ()
 
 serverTimeout :: Timeout

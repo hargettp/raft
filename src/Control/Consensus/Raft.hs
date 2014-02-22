@@ -87,7 +87,9 @@ follow vRaft endpoint name = do
         raft <- readTVar vRaft
         return $ raftCurrentTerm raft
     infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
-    raceAll_ [doFollow vRaft endpoint name, doVote vRaft endpoint name]
+    raceAll_ [doFollow vRaft endpoint name,
+                doVote vRaft endpoint name] -- ,
+                -- doRedirect vRaft endpoint name]
 
 {-|
     Wait for 'AppendEntries' requests and process them, commit new changes
@@ -235,7 +237,7 @@ lead vRaft endpoint name = do
     infoM _log $ "Server " ++ name ++ " leading in new term " ++ (show term)
     followers <- mapM (makeFollower term) members
     raceAll_ $ [doPulse vRaft leader followers,
-                    doServe endpoint leader vRaft followers,
+                    doServe vRaft endpoint leader followers,
                     doVote vRaft endpoint leader]
                 ++ map followerNotifier followers
     where
@@ -289,10 +291,27 @@ doPulse vRaft name followers = do
             _ <- tryPutTMVar (followerLastIndex follower) index
             return ()
 
-doServe :: (RaftLog l v) => Endpoint -> ServerId -> TVar (RaftState l v) -> [Follower] -> IO ()
-doServe endpoint leader vRaft followers = do
-    -- onPerformAction endpoint leader $ action -> do
-    doServe endpoint leader vRaft followers
+doServe :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> [Follower] -> IO ()
+doServe vRaft endpoint leader followers = do
+    onPerformAction endpoint leader $ \action -> do
+        raft <- atomically $ readTVar vRaft
+        let rlog = serverLog $ raftServer raft
+            term = raftCurrentTerm raft
+            nextIndex = (lastAppended rlog) + 1
+        rlog1 <- appendEntries rlog nextIndex [RaftLogEntry term action]
+        atomically $ modifyTVar vRaft $ \oldRaft -> changeRaftLog rlog1 oldRaft
+        return $ Right nextIndex
+    doServe vRaft endpoint leader followers
+
+{-
+doRedirect :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
+doRedirect vRaft endpoint member = do
+    onPerformAction endpoint member $ \_ -> do
+        raft <- atomically $ readTVar vRaft
+        let leader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft
+        return $ Left leader
+    doRedirect vRaft endpoint member
+-}
 
 data Follower = Follower {
     followerLastIndex :: TMVar Index,

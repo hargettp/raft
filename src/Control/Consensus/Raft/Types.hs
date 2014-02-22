@@ -34,6 +34,7 @@ module Control.Consensus.Raft.Types (
     changeRaftTerm,
     changeRaftLeader,
     changeRaftLastCandidate,
+    changeRaftLog,
     -- * Actions
     Action(..),
     Command,
@@ -208,6 +209,13 @@ changeRaftLeader leader raft = raft {
                 configurationLeader = leader
             }}}
 }
+
+changeRaftLog :: (RaftLog l v) => l -> RaftState l v -> RaftState l v
+changeRaftLog rlog raft = raft {
+    raftServer = (raftServer raft) {
+            serverLog = rlog
+        }
+    }
 
 data RaftLogEntry =  RaftLogEntry {
     entryTerm :: Term,
