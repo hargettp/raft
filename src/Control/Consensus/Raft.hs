@@ -176,8 +176,8 @@ doVote vRaft endpoint name = do
         logOutOfDate raft req = if (rvCandidateLastEntryTerm req) > (raftCurrentTerm raft)
                                 then True
                                 else if (rvCandidateLastEntryTerm req) < (raftCurrentTerm raft)
-                                    then False
-                                    else (lastAppended $ serverLog $ raftServer raft) <= (rvCandidateLastEntryIndex req)
+                                        then False
+                                        else (lastAppended $ serverLog $ raftServer raft) <= (rvCandidateLastEntryIndex req)
 
 {-|
 Initiate an election, volunteering to lead the cluster if elected.
