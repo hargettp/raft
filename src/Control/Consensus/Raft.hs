@@ -103,7 +103,7 @@ doFollow vRaft endpoint member = do
         -- grab these entries, because we can't do so inside the transaction
         entries <- fetchEntries (serverLog $ raftServer raft) (aePreviousIndex req) 1
         atomically $ if (aeLeaderTerm req) < (raftCurrentTerm raft)
-            then return (raftCurrentTerm raft,False)
+            then return $ createResult False raft
             else do
                 -- first update term and leader
                 raft1 <- do
@@ -122,9 +122,9 @@ doFollow vRaft endpoint member = do
                 -- now check that we're in sync
                 case entries of
                     -- we can only have an empty list if we are at the beginning of the log
-                    [] -> return (raftCurrentTerm raft1,-1 == aePreviousIndex req)
+                    [] -> return $ createResult (-1 == aePreviousIndex req) raft1
                     (entry:_) -> let term = raftCurrentTerm raft1
-                                     in return (term,(term == (entryTerm entry)))
+                                     in return $ createResult (term == (entryTerm entry)) raft1
     if success
         then do
             -- what is good here is that since there is only 1 doFollow
@@ -145,19 +145,19 @@ doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doVote vRaft endpoint name = do
     onRequestVote endpoint name $ \req -> do
         debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
-        (term,vote,reason) <- atomically $ do
+        (raft,vote,reason) <- atomically $ do
             raft <- readTVar vRaft
             if (rvCandidateTerm req) < (raftCurrentTerm raft)
-                then return (raftCurrentTerm raft,False,"Candidate term too old")
+                then return (raft,False,"Candidate term too old")
                 else do
                     case raftLastCandidate raft of
                         Just candidate -> do
                             if (candidate == rvCandidate req)
-                                then return (raftCurrentTerm raft,True,"Candidate already seen")
-                                else return (raftCurrentTerm raft,False,"Already saw different candidate")
+                                then return (raft,True,"Candidate already seen")
+                                else return (raft,False,"Already saw different candidate")
                         Nothing -> do
                             if name == rvCandidate req
-                                then return (raftCurrentTerm raft,True,"Voting for self")
+                                then return (raft,True,"Voting for self")
                                 else if logOutOfDate raft req
                                     then do
                                         modifyTVar vRaft $ \oldRaft -> 
@@ -166,11 +166,10 @@ doVote vRaft endpoint name = do
                                                 else (raftCurrentTerm oldRaft)
                                             in changeRaftTerm newTerm
                                                 $ changeRaftLastCandidate (Just $ rvCandidate req) oldRaft
-                                        return (raftCurrentTerm raft,True,"Candidate log more up to date")
-                                    else return (raftCurrentTerm raft,False,"Candidate log out of date")
-        -- raft <- atomically $ readTVar vRaft
-        debugM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (term,vote)) ++ " because " ++ reason
-        return (term,vote)
+                                        return (raft,True,"Candidate log more up to date")
+                                    else return (raft,False,"Candidate log out of date")
+        debugM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
+        return $ createResult vote raft
     doVote vRaft endpoint name
     where
         -- check that candidate log is more up to date than this server's log
@@ -213,14 +212,14 @@ doVolunteer vRaft endpoint candidate = do
     debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)
     return $ wonElection votes
     where
-        wonElection :: M.Map Name (Maybe (Term,Bool)) -> Bool
+        wonElection :: M.Map Name (Maybe MemberResult) -> Bool
         wonElection votes = majority votes $ M.foldl (\tally ballot -> 
             case ballot of
-                Just (_,vote) -> if vote then tally + 1 else tally 
+                Just (result) -> if (memberActionSuccess result) then tally + 1 else tally 
                 _ -> tally
             )
             0 votes
-        majority :: M.Map Name (Maybe (Term,Bool)) -> Int -> Bool
+        majority :: M.Map Name (Maybe MemberResult) -> Int -> Bool
         majority votes tally = tally > ((M.size $ votes) `quot` 2)
 
 lead :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
@@ -264,13 +263,13 @@ lead vRaft endpoint name = do
                                      in goAppendEntries cs member leader term prevLogIndex prevTerm index entries
             case response of
                 Nothing -> notify term lastIndex member
-                Just (memberTerm,success) -> if memberTerm > term
+                Just result -> if (memberCurrentTerm result) > term
                         then do
                             -- TODO this doesn't feel atomic enough
-                            atomically $ modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = memberTerm}
+                            atomically $ modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = memberCurrentTerm result}
                             debugM _log $ "Leader " ++ name ++ " has lower term than member " ++ member
                             return ()
-                        else if success
+                        else if (memberActionSuccess result)
                             -- TODO figure these calls out
                             then notify term lastIndex member
                             else notify term lastIndex member
@@ -300,15 +299,14 @@ doServe vRaft endpoint leader followers = do
             nextIndex = (lastAppended rlog) + 1
         rlog1 <- appendEntries rlog nextIndex [RaftLogEntry term action]
         atomically $ modifyTVar vRaft $ \oldRaft -> changeRaftLog rlog1 oldRaft
-        return $ Right nextIndex
+        return $ createResult True raft
     doServe vRaft endpoint leader followers
 
 doRedirect :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doRedirect vRaft endpoint member = do
     onPerformAction endpoint member $ \_ -> do
         raft <- atomically $ readTVar vRaft
-        let leader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft
-        return $ Left leader
+        return $ createResult False raft
     doRedirect vRaft endpoint member
 
 data Follower = Follower {

@@ -24,6 +24,9 @@ module Control.Consensus.Raft.Protocol (
 
     RequestVote(..),
 
+    MemberResult(..),
+    createResult,
+
     -- * Client call
     goPerformAction,
 
@@ -47,7 +50,7 @@ module Control.Consensus.Raft.Protocol (
 -- local imports
 
 import Control.Consensus.Raft.Types
-import Data.Log (Index)
+import Data.Log
 
 -- external imports
 
@@ -84,6 +87,25 @@ data RequestVote = RequestVote {
 
 instance Serialize RequestVote
 
+data MemberResult = MemberResult {
+    memberActionSuccess :: Bool,
+    memberLeader :: Maybe ServerId,
+    memberCurrentTerm :: Term,
+    memberLastAppended :: Index,
+    memberLastCommitted :: Index
+} deriving (Eq,Show,Generic)
+
+instance Serialize MemberResult
+
+createResult :: (RaftLog l v) => Bool -> RaftState l v -> MemberResult
+createResult success raft = MemberResult {
+    memberActionSuccess = success,
+    memberLeader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft,
+    memberCurrentTerm = raftCurrentTerm raft,
+    memberLastAppended = lastAppended $ serverLog $ raftServer raft,
+    memberLastCommitted = lastCommitted $ serverLog $ raftServer raft
+}
+
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
@@ -95,10 +117,14 @@ goAppendEntries :: CallSite
             -> Term                     -- ^^ Term of entry just priot to the entries being appended
             -> Index                    -- ^^ Last index up to which all entries are committed on leader
             -> [RaftLogEntry]    -- ^^ Entries to append
-            -> IO (Maybe (Term,Bool))
+            -> IO (Maybe MemberResult)
 goAppendEntries cs member leader term prevLogIndex prevTerm commitIndex entries = do
-    callWithTimeout cs member methodAppendEntries rpcTimeout
+    response <- callWithTimeout cs member methodAppendEntries rpcTimeout
         $ encode $ AppendEntries leader term prevLogIndex prevTerm commitIndex entries
+    case response of
+        Just bytes -> let Right results = decode bytes
+                      in return $ Just results
+        _ -> return Nothing
 
 methodRequestVote :: String
 methodRequestVote = "requestVote"
@@ -108,10 +134,16 @@ goRequestVote :: CallSite -> [Name]
                 -> ServerId -- ^^ Candidate's id
                 -> Index    -- ^^ Index of candidate's last entry
                 -> Term     -- ^^ Term of candidate's last entry
-                -> IO (M.Map Name (Maybe (Term,Bool)))
+                -> IO (M.Map Name (Maybe MemberResult))
 goRequestVote cs members term candidate lastIndex lastTerm = do
-    gcallWithTimeout cs members methodRequestVote rpcTimeout
+    results <- gcallWithTimeout cs members methodRequestVote rpcTimeout
         $ encode $ RequestVote candidate term lastIndex lastTerm
+    return $ mapResults results
+    where
+        mapResults results = M.map (\msg ->
+            case msg of
+                Just bytes -> let Right result = decode bytes in Just result
+                _ -> Nothing) results
 
 methodPerformAction :: String
 methodPerformAction = "performAction"
@@ -128,37 +160,37 @@ goPerformAction cs member cmd = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> ServerId -> (AppendEntries -> IO (Term,Bool)) -> IO (Index,Bool)
+onAppendEntries :: Endpoint -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Index,Bool)
 onAppendEntries endpoint server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries heartbeatTimeout
     case msg of
         Just (bytes,reply) -> do
             let Right req = decode bytes
-            (term,success) <- fn req
-            reply (term,success)
+            result <- fn req
+            reply $ encode result
             return (aeCommittedIndex req,True)
         Nothing -> return (0,False)
 
 {-|
 Wait for an 'RequestVote' RPC to arrive, and process it when it arrives.
 -}
-onRequestVote :: Endpoint -> ServerId -> (RequestVote -> IO (Term,Bool)) -> IO ()
+onRequestVote :: Endpoint -> ServerId -> (RequestVote -> IO MemberResult) -> IO ()
 onRequestVote endpoint server fn = do
     (bytes,reply) <- hear endpoint server methodRequestVote
     let Right req = decode bytes
-    (term,success) <- fn req
-    reply (term,success)
+    result <- fn req
+    reply $ encode result
     return ()
 
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: Endpoint -> ServerId -> (Action -> IO (Either (Maybe ServerId) Index)) -> IO ()
+onPerformAction :: Endpoint -> ServerId -> (Action -> IO MemberResult) -> IO ()
 onPerformAction endpoint leader fn = do
     (bytes,reply) <- hear endpoint leader methodPerformAction
     let Right cmd = decode bytes
     response <- fn cmd
-    reply response
+    reply $ encode response
     return ()
 
 --------------------------------------------------------------------------------
