@@ -151,10 +151,11 @@ methodPerformAction = "performAction"
 goPerformAction :: CallSite
                     -> ServerId
                     -> Action
-                    -> IO (Either (Maybe ServerId) Index)
+                    -> IO MemberResult
 goPerformAction cs member cmd = do
-    index <- call cs member methodPerformAction $ encode cmd
-    return index
+    msg <- call cs member methodPerformAction $ encode cmd
+    let Right result = decode msg
+    return result
 
 {-|
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
