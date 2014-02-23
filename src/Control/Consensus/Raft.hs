@@ -88,8 +88,8 @@ follow vRaft endpoint name = do
         return $ raftCurrentTerm raft
     infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
     raceAll_ [doFollow vRaft endpoint name,
-                doVote vRaft endpoint name] -- ,
-                -- doRedirect vRaft endpoint name]
+                doVote vRaft endpoint name,
+                doRedirect vRaft endpoint name]
 
 {-|
     Wait for 'AppendEntries' requests and process them, commit new changes
@@ -303,7 +303,6 @@ doServe vRaft endpoint leader followers = do
         return $ Right nextIndex
     doServe vRaft endpoint leader followers
 
-{-
 doRedirect :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doRedirect vRaft endpoint member = do
     onPerformAction endpoint member $ \_ -> do
@@ -311,7 +310,6 @@ doRedirect vRaft endpoint member = do
         let leader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft
         return $ Left leader
     doRedirect vRaft endpoint member
--}
 
 data Follower = Follower {
     followerLastIndex :: TMVar Index,

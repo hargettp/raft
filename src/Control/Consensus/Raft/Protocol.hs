@@ -71,31 +71,9 @@ data AppendEntries =  AppendEntries {
     aePreviousTerm :: Term,
     aeCommittedIndex :: Index,
     aeEntries :: [RaftLogEntry]
-} deriving (Eq,Show)
+} deriving (Eq,Show,Generic)
 
-instance Serialize AppendEntries where
-    put entries = do
-        put $ aeLeader entries
-        put $ aeLeaderTerm entries
-        put $ aePreviousIndex entries
-        put $ aePreviousTerm entries
-        put $ aeCommittedIndex entries
-        put $ aeEntries entries
-    get = do
-        leader <- get
-        leaderTerm <- get
-        previousIndex <- get
-        previousTerm <- get
-        committedIndex <- get
-        entries <- get
-        return AppendEntries {
-            aeLeader = leader,
-            aeLeaderTerm = leaderTerm,
-            aePreviousIndex = previousIndex,
-            aePreviousTerm = previousTerm,
-            aeCommittedIndex = committedIndex,
-            aeEntries = entries
-        }
+instance Serialize AppendEntries
 
 data RequestVote = RequestVote {
         rvCandidate :: ServerId,
@@ -120,7 +98,7 @@ goAppendEntries :: CallSite
             -> IO (Maybe (Term,Bool))
 goAppendEntries cs member leader term prevLogIndex prevTerm commitIndex entries = do
     callWithTimeout cs member methodAppendEntries rpcTimeout
-        $ AppendEntries leader term prevLogIndex prevTerm commitIndex entries
+        $ encode $ AppendEntries leader term prevLogIndex prevTerm commitIndex entries
 
 methodRequestVote :: String
 methodRequestVote = "requestVote"
@@ -133,7 +111,7 @@ goRequestVote :: CallSite -> [Name]
                 -> IO (M.Map Name (Maybe (Term,Bool)))
 goRequestVote cs members term candidate lastIndex lastTerm = do
     gcallWithTimeout cs members methodRequestVote rpcTimeout
-        $ RequestVote candidate term lastIndex lastTerm
+        $ encode $ RequestVote candidate term lastIndex lastTerm
 
 methodPerformAction :: String
 methodPerformAction = "performAction"
@@ -143,7 +121,7 @@ goPerformAction :: CallSite
                     -> Action
                     -> IO (Either (Maybe ServerId) Index)
 goPerformAction cs member cmd = do
-    index <- call cs member methodPerformAction cmd
+    index <- call cs member methodPerformAction $ encode cmd
     return index
 
 {-|
@@ -154,7 +132,8 @@ onAppendEntries :: Endpoint -> ServerId -> (AppendEntries -> IO (Term,Bool)) -> 
 onAppendEntries endpoint server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries heartbeatTimeout
     case msg of
-        Just (req,reply) -> do
+        Just (bytes,reply) -> do
+            let Right req = decode bytes
             (term,success) <- fn req
             reply (term,success)
             return (aeCommittedIndex req,True)
@@ -165,7 +144,8 @@ Wait for an 'RequestVote' RPC to arrive, and process it when it arrives.
 -}
 onRequestVote :: Endpoint -> ServerId -> (RequestVote -> IO (Term,Bool)) -> IO ()
 onRequestVote endpoint server fn = do
-    (req,reply) <- hear endpoint server methodRequestVote
+    (bytes,reply) <- hear endpoint server methodRequestVote
+    let Right req = decode bytes
     (term,success) <- fn req
     reply (term,success)
     return ()
@@ -175,7 +155,8 @@ Wait for a request from a client to perform an action, and process it when it ar
 -}
 onPerformAction :: Endpoint -> ServerId -> (Action -> IO (Either (Maybe ServerId) Index)) -> IO ()
 onPerformAction endpoint leader fn = do
-    (cmd,reply) <- hear endpoint leader methodPerformAction
+    (bytes,reply) <- hear endpoint leader methodPerformAction
+    let Right cmd = decode bytes
     response <- fn cmd
     reply response
     return ()
