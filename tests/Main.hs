@@ -9,6 +9,7 @@ import qualified TestRaft as R
 -- external imports
 
 import System.Directory
+import System.Info
 import System.Log.Logger
 import System.Log.Handler.Simple
 
@@ -20,6 +21,7 @@ import Test.Framework
 main :: IO ()
 main = do
   initLogging
+  printPlatform
   defaultMain tests
 
 initLogging :: IO ()
@@ -32,6 +34,12 @@ initLogging = do
   s <- fileHandler logFile INFO
   updateGlobalLogger rootLoggerName (setLevel INFO)
   updateGlobalLogger rootLoggerName (addHandler s)
+
+printPlatform :: IO ()
+printPlatform = do
+    putStrLn $ "OS: " ++ os ++ "/" ++ arch
+    putStrLn $ "Compilter: " ++ compilerName ++ " " ++ (show compilerVersion)
+    putStrLn ""
 
 tests :: [Test.Framework.Test]
 tests = [

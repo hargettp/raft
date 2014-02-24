@@ -51,22 +51,10 @@ testCluster = do
     let cfg = newConfiguration ["server1","server2","server3"]
     transport <- newMemoryTransport
 
-    endpoint1 <- newEndpoint [transport]
-    endpoint2 <- newEndpoint [transport]
-    endpoint3 <- newEndpoint [transport]
-
-    bindEndpoint_ endpoint1 "server1"
-    bindEndpoint_ endpoint2 "server2"
-    bindEndpoint_ endpoint3 "server3"
-
-    server1 <- newIntServer cfg "server1" 0
-    server2 <- newIntServer cfg "server2" 0
-    server3 <- newIntServer cfg "server3" 0
-
     (result1,result2,result3) <- runConcurrently $ (,,)
-        <$> Concurrently (runFor serverTimeout $ runConsensus endpoint1 server1)
-        <*> Concurrently (runFor serverTimeout $ runConsensus endpoint2 server2)
-        <*> Concurrently (runFor serverTimeout $ runConsensus endpoint3 server3)
+        <$> Concurrently (runFor serverTimeout transport cfg "server1")
+        <*> Concurrently (runFor serverTimeout transport cfg "server2")
+        <*> Concurrently (runFor serverTimeout transport cfg "server3")
     let servers = [result1,result2,result3]
         leaders = map (clusterLeader . serverConfiguration . serverState) servers
         results = map (serverData . serverState)  servers
@@ -82,12 +70,17 @@ serverTimeout = 2 * 1000000
 {-|
 Utility for running a server only for a defined period of time
 -}
-runFor :: Timeout -> IO a -> IO a
-runFor timeout action = do
-    actionAsync <- async action
+runFor :: Timeout -> Transport -> Configuration -> ServerId -> IO (RaftServer IntLog Int)
+runFor timeout transport cfg name  = do
+    endpoint <- newEndpoint [transport]
+    bindEndpoint_ endpoint name
+    server <- newIntServer cfg name 0
+    actionAsync <- async $ runConsensus endpoint server
     threadDelay timeout
     cancel actionAsync
-    wait actionAsync
+    result <- wait actionAsync
+    unbindEndpoint_ endpoint name
+    return result
 
 
 
