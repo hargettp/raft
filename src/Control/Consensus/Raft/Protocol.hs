@@ -50,7 +50,7 @@ module Control.Consensus.Raft.Protocol (
 -- local imports
 
 import Control.Consensus.Raft.Types
-import Data.Log
+import Control.Consensus.Log
 
 -- external imports
 

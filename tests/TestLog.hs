@@ -24,7 +24,7 @@ import IntServer
 
 -- external imports
 
-import Data.Log
+import Control.Consensus.Log
 import Data.Serialize
 
 import Prelude hiding (log)

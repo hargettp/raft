@@ -4,7 +4,7 @@
 
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Data.Log
+-- Module      :  Control.Consensus.Log
 -- Copyright   :  (c) Phil Hargett 2014
 -- License     :  MIT (see LICENSE file)
 -- 
@@ -16,7 +16,7 @@
 --
 -----------------------------------------------------------------------------
 
-module Data.Log (
+module Control.Consensus.Log (
 
     Index,
     Log(..),

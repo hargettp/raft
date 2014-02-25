@@ -57,7 +57,7 @@ module Control.Consensus.Raft.Types (
 
 import qualified Data.ByteString as B
 import qualified Data.List as L
-import Data.Log
+import Control.Consensus.Log
 import Data.Serialize
 import qualified Data.Set as S
 import Data.Typeable

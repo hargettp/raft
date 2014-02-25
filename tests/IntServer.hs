@@ -29,7 +29,7 @@ module IntServer (
 
 import Control.Consensus.Raft.Types
 
-import Data.Log
+import Control.Consensus.Log
 
 -- external imports
 
