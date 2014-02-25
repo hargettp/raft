@@ -162,8 +162,8 @@ doVote vRaft endpoint name = do
                                     then do
                                         modifyTVar vRaft $ \oldRaft -> 
                                             let newTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
-                                                then rvCandidateTerm req
-                                                else (raftCurrentTerm oldRaft)
+                                                            then rvCandidateTerm req
+                                                            else (raftCurrentTerm oldRaft)
                                             in changeRaftTerm newTerm
                                                 $ changeRaftLastCandidate (Just $ rvCandidate req) oldRaft
                                         return (raft,True,"Candidate log more up to date")
