@@ -98,7 +98,7 @@ follow vRaft endpoint name = do
 doFollow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doFollow vRaft endpoint member = do
     (committed,success) <- onAppendEntries endpoint member $ \req -> do
-        debugM _log $ "Server " ++ member ++ " received AppendEntries " ++ (show req)
+        debugM _log $ "Server " ++ member ++ " received " ++ (show req)
         raft <- atomically $ readTVar vRaft
         -- grab these entries, because we can't do so inside the transaction
         entries <- fetchEntries (serverLog $ raftServer raft) (aePreviousIndex req) 1
@@ -236,8 +236,8 @@ lead vRaft endpoint name = do
     infoM _log $ "Server " ++ name ++ " leading in new term " ++ (show term)
     followers <- mapM (makeFollower term) members
     raceAll_ $ [doPulse vRaft leader followers,
-                    doServe vRaft endpoint leader followers,
-                    doVote vRaft endpoint leader]
+                     doVote vRaft endpoint leader,
+                     doServe vRaft endpoint leader followers]
                 ++ map followerNotifier followers
     where
         makeFollower term member = do
@@ -292,7 +292,9 @@ doPulse vRaft name followers = do
 
 doServe :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> [Follower] -> IO ()
 doServe vRaft endpoint leader followers = do
+    infoM _log $ "Serving from " ++ leader
     onPerformAction endpoint leader $ \action -> do
+        infoM _log $ "Leader " ++ leader ++ " received action " ++ (show action)
         raft <- atomically $ readTVar vRaft
         let rlog = serverLog $ raftServer raft
             term = raftCurrentTerm raft
@@ -304,7 +306,9 @@ doServe vRaft endpoint leader followers = do
 
 doRedirect :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doRedirect vRaft endpoint member = do
-    onPerformAction endpoint member $ \_ -> do
+    infoM _log $ "Redirecting from " ++ member
+    onPerformAction endpoint member $ \action -> do
+        infoM _log $ "Member " ++ member ++ " received action " ++ (show action)
         raft <- atomically $ readTVar vRaft
         return $ createResult False raft
     doRedirect vRaft endpoint member

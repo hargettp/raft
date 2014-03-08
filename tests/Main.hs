@@ -32,13 +32,13 @@ initLogging = do
     then removeFile logFile
     else return ()
   s <- fileHandler logFile INFO
-  updateGlobalLogger rootLoggerName (setLevel INFO)
+  updateGlobalLogger rootLoggerName (setLevel WARNING)
   updateGlobalLogger rootLoggerName (addHandler s)
 
 printPlatform :: IO ()
 printPlatform = do
     putStrLn $ "OS: " ++ os ++ "/" ++ arch
-    putStrLn $ "Compilter: " ++ compilerName ++ " " ++ (show compilerVersion)
+    putStrLn $ "Compiler: " ++ compilerName ++ " " ++ (show compilerVersion)
     putStrLn ""
 
 tests :: [Test.Framework.Test]

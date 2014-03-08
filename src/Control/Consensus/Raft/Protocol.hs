@@ -62,10 +62,14 @@ import GHC.Generics
 import Network.Endpoints
 import Network.RPC
 
+import System.Log.Logger
 import qualified System.Random as R
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
+
+_log :: String
+_log = "raft.protocol"
 
 data AppendEntries =  AppendEntries {
     aeLeader :: ServerId,
@@ -151,11 +155,14 @@ methodPerformAction = "performAction"
 goPerformAction :: CallSite
                     -> ServerId
                     -> Action
-                    -> IO MemberResult
-goPerformAction cs member cmd = do
-    msg <- call cs member methodPerformAction $ encode cmd
-    let Right result = decode msg
-    return result
+                    -> IO (Maybe MemberResult)
+goPerformAction cs member action = do
+    maybeMsg <- callWithTimeout cs member methodPerformAction rpcTimeout $ encode action
+    case maybeMsg of
+        Just msg -> case decode msg of
+                        Right result -> return result
+                        Left _ -> return Nothing
+        Nothing -> return Nothing
 
 {-|
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
@@ -187,10 +194,11 @@ onRequestVote endpoint server fn = do
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
 onPerformAction :: Endpoint -> ServerId -> (Action -> IO MemberResult) -> IO ()
-onPerformAction endpoint leader fn = do
-    (bytes,reply) <- hear endpoint leader methodPerformAction
-    let Right cmd = decode bytes
-    response <- fn cmd
+onPerformAction endpoint member fn = do
+    (bytes,reply) <- hear endpoint member methodPerformAction
+    infoM _log $ "Heard performAction on " ++ member
+    let Right action = decode bytes
+    response <- fn action
     reply $ encode response
     return ()
 

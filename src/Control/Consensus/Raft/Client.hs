@@ -1,0 +1,91 @@
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Control.Consensus.Raft.Client
+-- Copyright   :  (c) Phil Hargett 2014
+-- License     :  MIT (see LICENSE file)
+-- 
+-- Maintainer  :  phil@haphazardhouse.net
+-- Stability   :  experimental
+-- Portability :  non-portable (requires STM)
+--
+-- (..... module description .....)
+--
+-----------------------------------------------------------------------------
+
+module Control.Consensus.Raft.Client (
+
+    Client,
+    newClient,
+
+    performAction
+
+) where
+
+-- local imports
+
+import Control.Concurrent
+import Control.Consensus.Log
+import Control.Consensus.Raft.Types
+import Control.Consensus.Raft.Protocol
+
+-- external imports
+
+import Network.Endpoints
+import Network.RPC
+
+import System.Log.Logger
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+_log :: String
+_log = "raft.client"
+
+data Client = Client {
+    clientEndpoint :: Endpoint,
+    clientName :: Name,
+    clientConfiguration :: Configuration
+}
+
+newClient :: Endpoint -> Name -> Configuration -> Client
+newClient endpoint name cfg = Client {
+    clientConfiguration = cfg,
+    clientEndpoint = endpoint,
+    clientName = name
+}
+
+{-|
+Perform an 'Action' in the cluster.
+-}
+performAction :: Client -> Action -> IO Index
+performAction client action = do
+    -- TODO consider whether there is an eventual timeout
+    -- in case the cluster can't be reached
+    let cfg = clientConfiguration client
+        leader = case clusterLeader cfg of
+            Just lead -> [lead]
+            Nothing -> []
+        members = leader ++ (clusterMembers cfg)
+        cs = (newCallSite (clientEndpoint client) (clientName client))
+    perform cs members members
+    where
+        perform cs members [] = do
+            infoM _log $ "Client " ++ (clientName client) ++ " can't find any members"
+            -- timeout in case there are issues
+            threadDelay $ 100 * 1000
+            infoM _log $ "Client " ++ (clientName client) ++ " searching again for members"
+            perform cs members members
+        perform cs members (leader:others) = do
+            infoM _log $ "Client " ++ (clientName client) ++ " sending action " ++ (show action) ++ " to " ++ leader
+            maybeResult <- goPerformAction cs leader action
+            infoM _log $ "Client " ++ (clientName client) ++ " sent action " ++ (show action) ++ " to " ++ leader
+            infoM _log $ "Client " ++ (clientName client) ++ " received response " ++ (show maybeResult)
+            case maybeResult of
+                Just result -> if (memberActionSuccess result)
+                    then return $ memberLastCommitted result
+                    else case memberLeader result of
+                        -- follow the redirect to the correct leader
+                        Just newLeader -> perform cs members (newLeader:others)
+                        -- keep trying the others until a leader is found
+                        Nothing -> perform cs members others
+                Nothing ->  perform cs members others
