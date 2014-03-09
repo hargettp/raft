@@ -54,12 +54,12 @@ _log = "test.raft"
 
 tests :: [Test.Framework.Test]
 tests = [
-     testCase "cluster" testCluster,
+    testCase "cluster" testCluster,
     testCase "client" testClient,
     testCase "performAction" testPerformAction,
-    testCase "goPerformAction" testGoPerformAction --,
-    -- testCase "clientPerformAction" testClientPerformAction,
-    -- testCase "runClientPerformAction" testRunClientPerformAction
+    testCase "goPerformAction" testGoPerformAction,
+    testCase "clientPerformAction" testClientPerformAction,
+    testCase "runClientPerformAction" testRunClientPerformAction
     ]
 
 testCluster :: Assertion
@@ -82,8 +82,9 @@ testClient = do
     let cfg = newConfiguration ["server1","server2","server3"]
     Right clientResult <- race (run3NodeCluster transport cfg)
                             (runClient transport "client1" cfg $ \client -> do
+                                threadDelay (500 * 1000)
                                 performAction client $ Cmd $ encode $ Add 1)
-    assertBool "Client index should be greater than zero" $ clientResult > 0
+    assertBool "Client index should be -1" $ clientResult == -1
 
 testPerformAction :: Assertion
 testPerformAction = do
@@ -118,6 +119,7 @@ testGoPerformAction = do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
         onPerformAction endpoint server $ \_ -> do
+            infoM _log $ "Returning result"
             return MemberResult {
                 memberActionSuccess = True,
                 memberLeader = Nothing,
@@ -125,6 +127,8 @@ testGoPerformAction = do
                 memberLastAppended = 0,
                 memberLastCommitted = 0
                 }
+    -- we have to wait a bit for server to start
+    threadDelay $ 1000 * 1000
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client

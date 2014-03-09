@@ -157,10 +157,10 @@ goPerformAction :: CallSite
                     -> Action
                     -> IO (Maybe MemberResult)
 goPerformAction cs member action = do
-    maybeMsg <- callWithTimeout cs member methodPerformAction rpcTimeout $ encode action
+    maybeMsg <- callWithTimeout cs member methodPerformAction (4 * rpcTimeout) $ encode action
     case maybeMsg of
         Just msg -> case decode msg of
-                        Right result -> return result
+                        Right result -> return $ Just result
                         Left _ -> return Nothing
         Nothing -> return Nothing
 
