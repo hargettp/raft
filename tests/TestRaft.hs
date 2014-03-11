@@ -200,7 +200,7 @@ runClient transport name cfg fn = catch (do
         return $ throw e)
 
 serverTimeout :: Timeout
-serverTimeout = 5 * 1000000
+serverTimeout = 2 * 1000000
 
 {-|
 Utility for running a server only for a defined period of time
