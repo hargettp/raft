@@ -88,7 +88,7 @@ follow vRaft endpoint name = do
         return $ raftCurrentTerm raft
     infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
     raceAll_ [doFollow vRaft endpoint name False,
-                doVote vRaft endpoint name,
+                doVote vRaft endpoint name False,
                 doRedirect vRaft endpoint name]
 
 {-|
@@ -143,20 +143,8 @@ doFollow vRaft endpoint member leading = do
 {-|
 Wait for request vote requests and process them
 -}
-doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
-doVote vRaft endpoint name = do
-    castVote vRaft endpoint name
-    doVote vRaft endpoint name
-
-{-
-A leader votes, but also resigns, because another election implies other cluster
-members have lost touch with the leader.
--}
-doResign :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
-doResign = castVote
-
-castVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
-castVote vRaft endpoint name = 
+doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> Bool -> IO ()
+doVote vRaft endpoint name leading = do
     onRequestVote endpoint name $ \req -> do
         debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
@@ -184,20 +172,23 @@ castVote vRaft endpoint name =
                                     else return (raft,False,"Candidate log out of date")
         debugM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
         return $ createResult vote raft
-        where
-            -- check that candidate log is more up to date than this server's log
-            logOutOfDate raft req = if (rvCandidateLastEntryTerm req) > (raftCurrentTerm raft)
-                then True
-                else if (rvCandidateLastEntryTerm req) < (raftCurrentTerm raft)
-                        then False
-                        else (lastAppended $ serverLog $ raftServer raft) <= (rvCandidateLastEntryIndex req)
+    if leading
+        then return ()
+        else doVote vRaft endpoint name leading
+    where
+        -- check that candidate log is more up to date than this server's log
+        logOutOfDate raft req = if (rvCandidateLastEntryTerm req) > (raftCurrentTerm raft)
+            then True
+            else if (rvCandidateLastEntryTerm req) < (raftCurrentTerm raft)
+                    then False
+                    else (lastAppended $ serverLog $ raftServer raft) <= (rvCandidateLastEntryIndex req)
 
 {-|
 Initiate an election, volunteering to lead the cluster if elected.
 -}
 volunteer :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO Bool
 volunteer vRaft endpoint name = do
-    results <- race (doVote vRaft endpoint name) (doVolunteer vRaft endpoint name)
+    results <- race (doVote vRaft endpoint name False) (doVolunteer vRaft endpoint name)
     case results of
         Left _ -> return False
         Right won -> return won
@@ -249,7 +240,7 @@ lead vRaft endpoint name = do
     infoM _log $ "Server " ++ name ++ " leading in new term " ++ (show term)
     followers <- mapM (makeFollower term) members
     raceAll_ $ [doPulse vRaft leader followers,
-                     doResign vRaft endpoint leader,
+                     doVote vRaft endpoint leader True,
                      doFollow vRaft endpoint name True,
                      doServe vRaft endpoint leader followers]
                 ++ map followerNotifier followers
