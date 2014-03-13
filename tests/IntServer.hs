@@ -22,6 +22,7 @@ module IntServer (
     IntLogEntry(..),
     IntLog,
     newIntLog,
+    IntServer,
     newIntServer
 ) where
 

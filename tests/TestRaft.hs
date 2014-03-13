@@ -32,7 +32,6 @@ import Prelude hiding (log)
 import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.Async
-import Control.Exception
 
 import Data.Serialize
 
@@ -54,7 +53,7 @@ _log = "test.raft"
 
 tests :: [Test.Framework.Test]
 tests = [
-    testCase "cluster" testCluster,
+    testCase "3cluster" test3Cluster,
     testCase "client" testClient,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
@@ -62,8 +61,8 @@ tests = [
     testCase "runClientPerformAction" testRunClientPerformAction
     ]
 
-testCluster :: Assertion
-testCluster = do
+test3Cluster :: Assertion
+test3Cluster = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3"]
     (result1,result2,result3) <- run3NodeCluster transport cfg
@@ -191,13 +190,11 @@ testRunClientPerformAction = do
 --------------------------------------------------------------------------------
 
 runClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
-runClient transport name cfg fn = catch (do
+runClient transport name cfg fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     let client = newClient endpoint name cfg
-    fn client) (\e -> do 
-        errorM _log $ "Client error: " ++ (show (e :: SomeException))
-        return $ throw e)
+    fn client
 
 serverTimeout :: Timeout
 serverTimeout = 2 * 1000000
@@ -217,10 +214,11 @@ runFor timeout transport cfg name  = do
     unbindEndpoint_ endpoint name
     return result
 
-run3NodeCluster :: Transport -> Configuration -> IO (RaftServer IntLog Int,RaftServer IntLog Int,RaftServer IntLog Int)
+run3NodeCluster :: Transport -> Configuration -> IO (IntServer,IntServer,IntServer)
 run3NodeCluster transport cfg = do
     let servers = clusterMembers cfg
+        clusterTimeout = serverTimeout
     runConcurrently $ (,,)
-        <$> Concurrently (runFor serverTimeout transport cfg $ servers !! 0)
-        <*> Concurrently (runFor serverTimeout transport cfg $ servers !! 1)
-        <*> Concurrently (runFor serverTimeout transport cfg $ servers !! 2)
+        <$> Concurrently (runFor clusterTimeout transport cfg $ servers !! 0)
+        <*> Concurrently (runFor clusterTimeout transport cfg $ servers !! 1)
+        <*> Concurrently (runFor clusterTimeout transport cfg $ servers !! 2)

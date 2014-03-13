@@ -31,10 +31,11 @@ module Control.Consensus.Raft.Types (
     RaftLogEntry(..),
     Server(..),
     ServerState(..),
-    changeRaftTerm,
-    changeRaftLeader,
-    changeRaftLastCandidate,
-    changeRaftLog,
+    setRaftTerm,
+    setRaftLeader,
+    setRaftLastCandidate,
+    setRaftLog,
+    setRaftServerState,
     -- * Actions
     Action(..),
     Command,
@@ -185,24 +186,24 @@ data RaftState l v = (RaftLog l v) => RaftState {
 {-|
 Update the current term in a new 'RaftState'
 -}
-changeRaftTerm :: Term -> RaftState l v -> RaftState l v
-changeRaftTerm term raft = raft {
+setRaftTerm :: Term -> RaftState l v -> RaftState l v
+setRaftTerm term raft = raft {
     raftCurrentTerm = term
 }
 
 {-|
 Update the last candidate in a new 'RaftState'
 -}
-changeRaftLastCandidate :: Maybe ServerId -> RaftState l v -> RaftState l v
-changeRaftLastCandidate candidate raft = raft {
+setRaftLastCandidate :: Maybe ServerId -> RaftState l v -> RaftState l v
+setRaftLastCandidate candidate raft = raft {
     raftLastCandidate = candidate
 }
 
 {-|
 Update the 'ServerState' in a new 'RaftState' to specify a new leader
 -}
-changeRaftLeader :: Maybe ServerId -> RaftState l v -> RaftState l v
-changeRaftLeader leader raft = raft {
+setRaftLeader :: Maybe ServerId -> RaftState l v -> RaftState l v
+setRaftLeader leader raft = raft {
     raftServer = (raftServer raft) {
         serverState = (serverState $ raftServer raft) {
             serverConfiguration = (serverConfiguration $ serverState $ raftServer raft) {
@@ -210,10 +211,17 @@ changeRaftLeader leader raft = raft {
             }}}
 }
 
-changeRaftLog :: (RaftLog l v) => l -> RaftState l v -> RaftState l v
-changeRaftLog rlog raft = raft {
+setRaftLog :: (RaftLog l v) => l -> RaftState l v -> RaftState l v
+setRaftLog rlog raft = raft {
     raftServer = (raftServer raft) {
             serverLog = rlog
+        }
+    }
+
+setRaftServerState :: (RaftLog l v) => ServerState v -> RaftState l v -> RaftState l v
+setRaftServerState state raft = raft {
+    raftServer = (raftServer raft) {
+            serverState = state
         }
     }
 

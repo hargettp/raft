@@ -19,10 +19,11 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:       src
   exposed-modules:     
+                       Control.Consensus.Log,
                        Control.Consensus.Raft, 
+                       Control.Consensus.Raft.Client, 
                        Control.Consensus.Raft.Protocol, 
-                       Control.Consensus.Raft.Types, 
-                       Data.Log
+                       Control.Consensus.Raft.Types
 
   -- other-modules:       
   other-extensions:    

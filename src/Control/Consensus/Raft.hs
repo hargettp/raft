@@ -99,32 +99,34 @@ doFollow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> Boo
 doFollow vRaft endpoint member leading = do
     (committed,continue) <- onAppendEntries endpoint member $ \req -> do
         debugM _log $ "Server " ++ member ++ " received " ++ (show req)
-        raft <- atomically $ readTVar vRaft
+        log <- atomically $ do
+            raft <- readTVar vRaft
+            return $ serverLog $ raftServer raft
         -- grab these entries, because we can't do so inside the transaction
-        entries <- fetchEntries (serverLog $ raftServer raft) (aePreviousIndex req) 1
-        atomically $ if (aeLeaderTerm req) < (raftCurrentTerm raft)
-            then return $ createResult False raft
-            else do
-                -- first update term and leader
-                raft1 <- do
+        entries <- fetchEntries log (aePreviousIndex req) 1
+        atomically $ do
+            raft <-readTVar vRaft
+            if (aeLeaderTerm req) < (raftCurrentTerm raft)
+                then return $ createResult False raft
+                else do
+                    -- first update term and leader
                     if (aeLeaderTerm req) > (raftCurrentTerm raft)
                         then  modifyTVar vRaft $ \oldRaft ->
-                            changeRaftTerm (aeLeaderTerm req)
-                                $ changeRaftLeader (Just $ aeLeader req)
-                                $ changeRaftLastCandidate Nothing oldRaft
+                            setRaftTerm (aeLeaderTerm req)
+                                $ setRaftLeader (Just $ aeLeader req)
+                                $ setRaftLastCandidate Nothing oldRaft
                         else if ((aeLeaderTerm req) == (raftCurrentTerm raft)) && 
                                     Nothing == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
                             then modifyTVar vRaft $ \oldRaft ->
-                                changeRaftLeader (Just $ aeLeader req)
-                                    $ changeRaftLastCandidate Nothing oldRaft
+                                setRaftLeader (Just $ aeLeader req)
+                                    $ setRaftLastCandidate Nothing oldRaft
                             else return ()
-                    readTVar vRaft
-                -- now check that we're in sync
-                case entries of
-                    -- we can only have an empty list if we are at the beginning of the log
-                    [] -> return $ createResult (-1 == aePreviousIndex req) raft1
-                    (entry:_) -> let term = raftCurrentTerm raft1
-                                     in return $ createResult (term == (entryTerm entry)) raft1
+                    -- now check that we're in sync
+                    case entries of
+                        -- we can only have an empty list if we are at the beginning of the log
+                        [] -> return $ createResult (-1 == aePreviousIndex req) raft
+                        (entry:_) -> let term = raftCurrentTerm raft
+                                         in return $ createResult (term == (entryTerm entry)) raft
     if continue
         then do
             -- what is good here is that since there is only 1 doFollow
@@ -133,8 +135,7 @@ doFollow vRaft endpoint member leading = do
             raft <- atomically $ readTVar vRaft
             (log,state) <- commitEntries (serverLog $ raftServer $ raft) committed (serverState $ raftServer $ raft)
             atomically $ modifyTVar vRaft $ \oldRaft ->
-                        let oldServer = raftServer oldRaft
-                            in oldRaft {raftServer = oldServer {serverLog = log,serverState = state} }
+                        setRaftLog log $ setRaftServerState state oldRaft
             if leading
                 then return ()
                 else doFollow vRaft endpoint member leading
@@ -166,11 +167,11 @@ doVote vRaft endpoint name leading = do
                                             let newTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
                                                             then rvCandidateTerm req
                                                             else (raftCurrentTerm oldRaft)
-                                            in changeRaftTerm newTerm
-                                                $ changeRaftLastCandidate (Just $ rvCandidate req) oldRaft
+                                            in setRaftTerm newTerm
+                                                $ setRaftLastCandidate (Just $ rvCandidate req) oldRaft
                                         return (raft,True,"Candidate log more up to date")
                                     else return (raft,False,"Candidate log out of date")
-        debugM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
+        infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
         return $ createResult vote raft
     if leading
         then return ()
@@ -197,8 +198,8 @@ doVolunteer :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> 
 doVolunteer vRaft endpoint candidate = do
     raft <- atomically $ do
         modifyTVar vRaft $ \oldRaft ->
-            changeRaftTerm ((raftCurrentTerm oldRaft) + 1)
-                $ changeRaftLastCandidate Nothing oldRaft
+            setRaftTerm ((raftCurrentTerm oldRaft) + 1)
+                $ setRaftLastCandidate Nothing oldRaft
         readTVar vRaft
     infoM _log $ "Server " ++ candidate ++ " volunteering in term " ++ (show $ raftCurrentTerm raft)
     let members = clusterMembers $ serverConfiguration $ serverState $ raftServer raft
@@ -230,9 +231,9 @@ lead :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 lead vRaft endpoint name = do
     raft <- atomically $ do
         modifyTVar vRaft $ \oldRaft ->
-            changeRaftTerm ((raftCurrentTerm oldRaft) + 1)
-                $ changeRaftLeader (Just name)
-                $ changeRaftLastCandidate Nothing oldRaft
+            setRaftTerm ((raftCurrentTerm oldRaft) + 1)
+                $ setRaftLeader (Just name)
+                $ setRaftLastCandidate Nothing oldRaft
         readTVar vRaft
     let members = clusterMembersOnly $ serverConfiguration $ serverState $ raftServer raft
         leader = name
@@ -305,7 +306,7 @@ doServe vRaft endpoint leader followers = do
             term = raftCurrentTerm raft
             nextIndex = (lastAppended rlog) + 1
         rlog1 <- appendEntries rlog nextIndex [RaftLogEntry term action]
-        atomically $ modifyTVar vRaft $ \oldRaft -> changeRaftLog rlog1 oldRaft
+        atomically $ modifyTVar vRaft $ \oldRaft -> setRaftLog rlog1 oldRaft
         return $ createResult True raft
     doServe vRaft endpoint leader followers
 
