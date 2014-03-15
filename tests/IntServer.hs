@@ -19,6 +19,7 @@
 
 module IntServer (
     IntCommand(..),
+    IntRaft,
     IntLogEntry(..),
     IntLog,
     newIntLog,
@@ -127,6 +128,8 @@ instance Log IntLog IO RaftLogEntry (ServerState Int) where
                 commit (next + 1) rest newState
 
 type IntServer = RaftServer IntLog Int
+
+type IntRaft = Raft IntLog Int
 
 newIntServer :: Configuration -> ServerId -> Int -> IO IntServer
 newIntServer cfg sid initial = do

@@ -17,7 +17,7 @@
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft (
-    runConsensus
+    withConsensus
 ) where
 
 -- local imports
@@ -53,23 +53,18 @@ _log = "raft.consensus"
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-runConsensus :: (RaftLog l v) => Endpoint -> RaftServer l v -> IO (RaftServer l v)
-runConsensus endpoint server = do
-    vRaft <- atomically $ newTVar $ RaftState {
-        raftCurrentTerm = 0,
-        raftLastCandidate = Nothing,
-        raftServer = server
-    }
-    catch (run vRaft) (\e -> do
-                case e of
-                    ThreadKilled -> return ()
-                    _ -> debugM _log $ (show $ serverId server) ++ " encountered error: " ++ (show (e :: AsyncException)))
-    raft <- atomically $ readTVar vRaft
-    return $ raftServer raft
+withConsensus :: (RaftLog l v) => Endpoint -> RaftServer l v -> (Raft l v -> IO ()) -> IO ()
+withConsensus endpoint server fn = do
+    vRaft <- atomically $ newRaft server
+    withAsync (run vRaft)
+        (\_ -> fn vRaft)
     where
         run vRaft = do
             infoM _log $ "Starting server " ++ (serverId server)
-            finally (do participate vRaft)
+            finally (catch (participate vRaft)
+                        (\e -> case e of
+                                ThreadKilled -> return ()
+                                _ -> debugM _log $ (show $ serverId server) ++ " encountered error: " ++ (show (e :: AsyncException))))
                 (do
                     infoM _log $ "Stopped server " ++ (serverId server) )
         participate vRaft = do

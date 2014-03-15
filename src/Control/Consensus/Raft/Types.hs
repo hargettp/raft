@@ -25,6 +25,8 @@ module Control.Consensus.Raft.Types (
     Term,
     Timeout,
     -- * Raft state
+    Raft,
+    newRaft,
     RaftState(..),
     RaftServer,
     RaftLog,
@@ -55,6 +57,8 @@ module Control.Consensus.Raft.Types (
 -- local imports
 
 -- external imports
+
+import Control.Concurrent.STM
 
 import qualified Data.ByteString as B
 import qualified Data.List as L
@@ -166,6 +170,15 @@ applyConfigurationAction initial _ = initial
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
 class (LogIO l RaftLogEntry (ServerState v)) => RaftLog l v
+
+type Raft l v = TVar (RaftState l v)
+
+newRaft :: (RaftLog l v) => RaftServer l v -> STM (Raft l v)
+newRaft server = newTVar $ RaftState {
+        raftCurrentTerm = 0,
+        raftLastCandidate = Nothing,
+        raftServer = server
+    }
 
 {-|
 A minimal 'Server' capable of participating in the Raft algorithm.

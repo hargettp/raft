@@ -29,9 +29,10 @@ import IntServer
 
 import Prelude hiding (log)
 
-import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.Async
+import Control.Concurrent.STM
+import Control.Exception
 
 import Data.Serialize
 
@@ -58,32 +59,37 @@ tests = [
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
     testCase "clientPerformAction" testClientPerformAction,
-    testCase "runClientPerformAction" testRunClientPerformAction
+    testCase "withClientPerformAction" testWithClientPerformAction
     ]
 
 test3Cluster :: Assertion
 test3Cluster = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3"]
-    (result1,result2,result3) <- run3NodeCluster transport cfg
-    let servers = [result1,result2,result3]
-        leaders = map (clusterLeader . serverConfiguration . serverState) servers
-        results = map (serverData . serverState)  servers
-    -- all results should be equal--and since we didn't perform any commands, should still be 0
-    assertBool "All results should be equal" $ all (== 0) results
-    assertBool ("All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
-    assertBool ("There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
-    return ()
+    with3Servers  transport cfg $ \vRafts -> do
+        threadDelay serverTimeout
+        servers <- mapM (\vRaft -> do
+            raft <- atomically $ readTVar vRaft
+            return $ raftServer raft) vRafts
+        let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+            results = map (serverData . serverState)  servers
+        -- all results should be equal--and since we didn't perform any commands, should still be 0
+        assertBool "All results should be equal" $ all (== 0) results
+        assertBool ("All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
+        assertBool ("There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
+        return ()
 
 testClient :: Assertion
 testClient = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3"]
-    Right clientResult <- race (run3NodeCluster transport cfg)
-                            (runClient transport "client1" cfg $ \client -> do
-                                threadDelay (500 * 1000)
+    with3Servers  transport cfg $ \_ -> do
+        threadDelay serverTimeout
+        Right clientResult <- race (threadDelay $ 1 * serverTimeout)
+            (withClient transport "client1" cfg $ \client -> do
+                                threadDelay serverTimeout
                                 performAction client $ Cmd $ encode $ Add 1)
-    assertBool "Client index should be -1" $ clientResult == -1
+        assertBool "Client index should be -1" $ clientResult == -1
 
 testPerformAction :: Assertion
 testPerformAction = do
@@ -127,7 +133,7 @@ testGoPerformAction = do
                 memberLastCommitted = 0
                 }
     -- we have to wait a bit for server to start
-    threadDelay $ 1000 * 1000
+    threadDelay serverTimeout
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
@@ -161,8 +167,8 @@ testClientPerformAction = do
     result <- performAction raftClient action
     assertBool "Result should be true" $ result == 1
 
-testRunClientPerformAction :: Assertion
-testRunClientPerformAction = do
+testWithClientPerformAction :: Assertion
+testWithClientPerformAction = do
     let client = "client1"
         server = "server1"
         cfg = newConfiguration [server]
@@ -181,7 +187,8 @@ testRunClientPerformAction = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let action = Cmd $ encode $ Add 1
-    result <- runClient transport client cfg $ \raftClient -> do
+    result <- withClient transport client cfg $ \raftClient -> do
+        threadDelay serverTimeout
         performAction raftClient action
     assertBool "Result should be true" $ result == 1
 
@@ -189,8 +196,8 @@ testRunClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
-runClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
-runClient transport name cfg fn = do
+withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
+withClient transport name cfg fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     let client = newClient endpoint name cfg
@@ -202,23 +209,17 @@ serverTimeout = 2 * 1000000
 {-|
 Utility for running a server only for a defined period of time
 -}
-runFor :: Timeout -> Transport -> Configuration -> ServerId -> IO (RaftServer IntLog Int)
-runFor timeout transport cfg name  = do
+withServer :: Transport -> Configuration -> ServerId -> (IntRaft -> IO ()) -> IO ()
+withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     server <- newIntServer cfg name 0
-    actionAsync <- async $ runConsensus endpoint server
-    threadDelay timeout
-    cancel actionAsync
-    result <- wait actionAsync
-    unbindEndpoint_ endpoint name
-    return result
+    finally (withConsensus endpoint server fn)
+        (unbindEndpoint_ endpoint name)
 
-run3NodeCluster :: Transport -> Configuration -> IO (IntServer,IntServer,IntServer)
-run3NodeCluster transport cfg = do
-    let servers = clusterMembers cfg
-        clusterTimeout = serverTimeout
-    runConcurrently $ (,,)
-        <$> Concurrently (runFor clusterTimeout transport cfg $ servers !! 0)
-        <*> Concurrently (runFor clusterTimeout transport cfg $ servers !! 1)
-        <*> Concurrently (runFor clusterTimeout transport cfg $ servers !! 2)
+with3Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
+with3Servers transport cfg fn = 
+    let names = clusterMembers cfg
+    in withServer transport cfg (names !! 0) $ \vRaft1 ->
+        withServer transport cfg (names !! 1) $ \vRaft2 ->
+        withServer transport cfg (names !! 2) $ \vRaft3 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3]
