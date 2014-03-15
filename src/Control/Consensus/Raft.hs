@@ -134,14 +134,16 @@ doFollow vRaft endpoint member leading = do
             if leading
                 then return ()
                 else doFollow vRaft endpoint member leading
-        else return ()
+        else if leading
+            then doFollow vRaft endpoint member leading
+            else return ()
 
 {-|
 Wait for request vote requests and process them
 -}
 doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> Bool -> IO ()
 doVote vRaft endpoint name leading = do
-    onRequestVote endpoint name $ \req -> do
+    won <- onRequestVote endpoint name $ \req -> do
         debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
             raft <- readTVar vRaft
@@ -168,7 +170,7 @@ doVote vRaft endpoint name leading = do
                                     else return (raft,False,"Candidate log out of date")
         infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
         return $ createResult vote raft
-    if leading
+    if leading && won
         then return ()
         else doVote vRaft endpoint name leading
     where
@@ -266,8 +268,11 @@ lead vRaft endpoint name = do
                 Nothing -> notify term lastIndex member
                 Just result -> if (memberCurrentTerm result) > term
                         then do
-                            -- TODO this doesn't feel atomic enough
-                            atomically $ modifyTVar vRaft $ \oldRaft -> oldRaft {raftCurrentTerm = memberCurrentTerm result}
+                            -- we have seen a member with a higher term, so we have to change terms
+                            -- and step down; but make sure we update ourselves to the highest known term
+                            atomically $ modifyTVar vRaft $ \oldRaft ->
+                                setRaftTerm (foldl max term [(memberCurrentTerm result),(raftCurrentTerm oldRaft)]) 
+                                    $ setRaftLastCandidate Nothing oldRaft
                             debugM _log $ "Leader " ++ name ++ " has lower term than member " ++ member
                             return ()
                         else if (memberActionSuccess result)

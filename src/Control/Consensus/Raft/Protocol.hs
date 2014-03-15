@@ -182,13 +182,13 @@ onAppendEntries endpoint server fn = do
 {-|
 Wait for an 'RequestVote' RPC to arrive, and process it when it arrives.
 -}
-onRequestVote :: Endpoint -> ServerId -> (RequestVote -> IO MemberResult) -> IO ()
+onRequestVote :: Endpoint -> ServerId -> (RequestVote -> IO MemberResult) -> IO Bool
 onRequestVote endpoint server fn = do
     (bytes,reply) <- hear endpoint server methodRequestVote
     let Right req = decode bytes
     result <- fn req
     reply $ encode result
-    return ()
+    return $ memberActionSuccess result
 
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
