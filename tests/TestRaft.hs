@@ -55,6 +55,9 @@ _log = "test.raft"
 tests :: [Test.Framework.Test]
 tests = [
     testCase "3cluster" test3Cluster,
+    testCase "3cluster-stability" test3ClusterStability,
+    testCase "5cluster" test5Cluster,
+    testCase "5cluster-stability" test5ClusterStability,
     testCase "client" testClient,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
@@ -67,16 +70,39 @@ test3Cluster = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
-        threadDelay serverTimeout
-        servers <- mapM (\vRaft -> do
-            raft <- atomically $ readTVar vRaft
-            return $ raftServer raft) vRafts
-        let leaders = map (clusterLeader . serverConfiguration . serverState) servers
-            results = map (serverData . serverState)  servers
-        -- all results should be equal--and since we didn't perform any commands, should still be 0
-        assertBool "All results should be equal" $ all (== 0) results
-        assertBool ("All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
-        assertBool ("There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
+        pause
+        _ <- checkForLeader (1 :: Integer) Nothing vRafts
+        return ()
+
+test3ClusterStability :: Assertion
+test3ClusterStability = do
+    transport <- newMemoryTransport
+    let cfg = newConfiguration ["server1","server2","server3"]
+    with3Servers  transport cfg $ \vRafts -> do
+        pause
+        firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
+        pause
+        _ <- checkForLeader (2 :: Integer) firstLeader vRafts
+        return ()
+
+test5Cluster :: Assertion
+test5Cluster = do
+    transport <- newMemoryTransport
+    let cfg = newConfiguration ["server1","server2","server3","server4","server5"]
+    with5Servers  transport cfg $ \vRafts -> do
+        pause >> pause
+        _ <- checkForLeader (1 :: Integer) Nothing vRafts
+        return ()
+
+test5ClusterStability :: Assertion
+test5ClusterStability = do
+    transport <- newMemoryTransport
+    let cfg = newConfiguration ["server1","server2","server3","server4","server5"]
+    with5Servers  transport cfg $ \vRafts -> do
+        pause >> pause
+        firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
+        pause >> pause
+        _ <- checkForLeader (2 :: Integer) firstLeader vRafts
         return ()
 
 testClient :: Assertion
@@ -84,10 +110,10 @@ testClient = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \_ -> do
-        threadDelay serverTimeout
+        pause
         Right clientResult <- race (threadDelay $ 1 * serverTimeout)
             (withClient transport "client1" cfg $ \client -> do
-                                threadDelay serverTimeout
+                                pause
                                 performAction client $ Cmd $ encode $ Add 1)
         assertBool "Client index should be -1" $ clientResult == -1
 
@@ -133,7 +159,7 @@ testGoPerformAction = do
                 memberLastCommitted = 0
                 }
     -- we have to wait a bit for server to start
-    threadDelay serverTimeout
+    pause
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
@@ -188,7 +214,7 @@ testWithClientPerformAction = do
     bindEndpoint_ endpoint client
     let action = Cmd $ encode $ Add 1
     result <- withClient transport client cfg $ \raftClient -> do
-        threadDelay serverTimeout
+        pause
         performAction raftClient action
     assertBool "Result should be true" $ result == 1
 
@@ -196,12 +222,35 @@ testWithClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
+checkForLeader :: Integer -> Maybe ServerId -> [TVar (RaftState IntLog Int)] -> IO (Maybe ServerId)
+checkForLeader run possibleLeader vRafts = do
+    servers <- mapM (\vRaft -> do
+        raft <- atomically $ readTVar vRaft
+        return $ raftServer raft) vRafts
+    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+        results = map (serverData . serverState)  servers
+    -- all results should be equal--and since we didn't perform any commands, should still be 0    
+    assertBool ((show run) ++ ": All results should be equal") $ all (== 0) results
+    assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
+    assertBool ((show run) ++ ": There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
+    let leader = (leaders !! 0)
+    case possibleLeader of
+        Just _ -> if all (== possibleLeader) leaders
+                            then return leader
+                            else return Nothing
+        Nothing -> if all (== leader) leaders
+                        then return leader
+                        else return Nothing
+
 withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
 withClient transport name cfg fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     let client = newClient endpoint name cfg
     fn client
+
+pause :: IO ()
+pause = threadDelay serverTimeout
 
 serverTimeout :: Timeout
 serverTimeout = 2 * 1000000
@@ -223,3 +272,12 @@ with3Servers transport cfg fn =
     in withServer transport cfg (names !! 0) $ \vRaft1 ->
         withServer transport cfg (names !! 1) $ \vRaft2 ->
         withServer transport cfg (names !! 2) $ \vRaft3 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3]
+
+with5Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
+with5Servers transport cfg fn = 
+    let names = clusterMembers cfg
+    in withServer transport cfg (names !! 0) $ \vRaft1 ->
+        withServer transport cfg (names !! 1) $ \vRaft2 ->
+        withServer transport cfg (names !! 2) $ \vRaft3 ->
+        withServer transport cfg (names !! 3) $ \vRaft4 ->
+        withServer transport cfg (names !! 4) $ \vRaft5 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3] ++ [vRaft4] ++ [vRaft5]
