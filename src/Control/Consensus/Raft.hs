@@ -41,6 +41,7 @@ import Network.RPC
 
 import Prelude hiding (log)
 
+import System.CPUTime
 import System.Log.Logger
 
 --------------------------------------------------------------------------------
@@ -260,10 +261,17 @@ lead vRaft endpoint name = do
                 prevLogIndex = index - 1
             previousEntries <- fetchEntries log prevLogIndex 1
             entries <- fetchEntries log index $ appended - index + 1
+            infoM _log $ "Server " ++ leader ++ " notifying member " ++ member ++ " in term " ++ (show term)
+            start <- getCPUTime
             response <- case previousEntries of
                 [] -> goAppendEntries cs member leader term prevLogIndex (-1) index entries
                 _ -> let prevTerm = entryTerm $ last previousEntries
                                      in goAppendEntries cs member leader term prevLogIndex prevTerm index entries
+            stop <- getCPUTime
+            let diff =  quot (stop - start) 1000000 -- 1 million picoseconds in a microsecond
+            if diff > toInteger rpcTimeout
+                then warningM _log $ "Elapsed time longer than rpcTimeout from " ++ leader ++ " to " ++ member ++ ": " ++ (show diff)
+                else return ()
             case response of
                 Nothing -> notify term lastIndex member
                 Just result -> if (memberCurrentTerm result) > term
