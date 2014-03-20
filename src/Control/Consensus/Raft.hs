@@ -93,7 +93,9 @@ follow vRaft endpoint name = do
 -}
 doFollow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> Bool -> IO ()
 doFollow vRaft endpoint member leading = do
-    (committed,continue) <- onAppendEntries endpoint member $ \req -> do
+    -- TOD what if we're the leader and we're processing a message
+    -- we sent earlier?
+    maybeCommitted <- onAppendEntries endpoint member $ \req -> do
         debugM _log $ "Server " ++ member ++ " received " ++ (show req)
         log <- atomically $ do
             raft <- readTVar vRaft
@@ -111,7 +113,7 @@ doFollow vRaft endpoint member leading = do
                             setRaftTerm (aeLeaderTerm req)
                                 $ setRaftLeader (Just $ aeLeader req)
                                 $ setRaftLastCandidate Nothing oldRaft
-                        else if ((aeLeaderTerm req) == (raftCurrentTerm raft)) && 
+                        else if ((aeLeaderTerm req) == (raftCurrentTerm raft)) &&
                                     Nothing == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
                             then modifyTVar vRaft $ \oldRaft ->
                                 setRaftLeader (Just $ aeLeader req)
@@ -123,8 +125,8 @@ doFollow vRaft endpoint member leading = do
                         [] -> return $ createResult (-1 == aePreviousIndex req) raft
                         (entry:_) -> let term = raftCurrentTerm raft
                                          in return $ createResult (term == (entryTerm entry)) raft
-    if continue
-        then do
+    case maybeCommitted of
+        Just committed ->  do
             -- what is good here is that since there is only 1 doFollow
             -- async, we can count on all of these invocations to commit as
             -- being synchronous, so no additional locking required
@@ -135,7 +137,7 @@ doFollow vRaft endpoint member leading = do
             if leading
                 then return ()
                 else doFollow vRaft endpoint member leading
-        else if leading
+        Nothing -> if leading
             then doFollow vRaft endpoint member leading
             else return ()
 
@@ -162,9 +164,7 @@ doVote vRaft endpoint name leading = do
                                 else if logOutOfDate raft req
                                     then do
                                         modifyTVar vRaft $ \oldRaft -> 
-                                            let newTerm = if (raftCurrentTerm oldRaft) < (rvCandidateTerm req)
-                                                            then rvCandidateTerm req
-                                                            else (raftCurrentTerm oldRaft)
+                                            let newTerm = max (raftCurrentTerm oldRaft) (rvCandidateTerm req)
                                             in setRaftTerm newTerm
                                                 $ setRaftLastCandidate (Just $ rvCandidate req) oldRaft
                                         return (raft,True,"Candidate log more up to date")
@@ -180,7 +180,7 @@ doVote vRaft endpoint name leading = do
             then True
             else if (rvCandidateLastEntryTerm req) < (raftCurrentTerm raft)
                     then False
-                    else (lastAppended $ serverLog $ raftServer raft) <= (rvCandidateLastEntryIndex req)
+                    else (rvCandidateLastEntryIndex req) >= (lastAppended $ serverLog $ raftServer raft)
 
 {-|
 Initiate an election, volunteering to lead the cluster if elected.

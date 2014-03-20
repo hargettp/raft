@@ -90,7 +90,7 @@ test5Cluster = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3","server4","server5"]
     with5Servers  transport cfg $ \vRafts -> do
-        pause >> pause
+        pause >> pause >> pause
         _ <- checkForLeader (1 :: Integer) Nothing vRafts
         return ()
 
@@ -99,9 +99,9 @@ test5ClusterStability = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3","server4","server5"]
     with5Servers  transport cfg $ \vRafts -> do
-        pause >> pause
+        pause >> pause >> pause
         firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
-        pause >> pause
+        pause >> pause >> pause
         _ <- checkForLeader (2 :: Integer) firstLeader vRafts
         return ()
 

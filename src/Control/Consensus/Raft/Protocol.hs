@@ -140,7 +140,8 @@ goRequestVote :: CallSite -> [Name]
                 -> Term     -- ^^ Term of candidate's last entry
                 -> IO (M.Map Name (Maybe MemberResult))
 goRequestVote cs members term candidate lastIndex lastTerm = do
-    results <- gcallWithTimeout cs members methodRequestVote rpcTimeout
+    timeout <- electionTimeout
+    results <- gcallWithTimeout cs members methodRequestVote timeout
         $ encode $ RequestVote candidate term lastIndex lastTerm
     return $ mapResults results
     where
@@ -168,7 +169,7 @@ goPerformAction cs member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Index,Bool)
+onAppendEntries :: Endpoint -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Maybe Index)
 onAppendEntries endpoint server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries heartbeatTimeout
     case msg of
@@ -176,8 +177,8 @@ onAppendEntries endpoint server fn = do
             let Right req = decode bytes
             result <- fn req
             reply $ encode result
-            return (aeCommittedIndex req,True)
-        Nothing -> return (0,False)
+            return $ Just $ aeCommittedIndex req
+        Nothing -> return Nothing
 
 {-|
 Wait for an 'RequestVote' RPC to arrive, and process it when it arrives.
@@ -229,7 +230,7 @@ pulseTimeout = (3 * rpcTimeout)
 Range for choosing an election timeout
 -}
 electionTimeoutRange :: (Timeout,Timeout)
-electionTimeoutRange = (2 * heartbeatTimeout, 4 * heartbeatTimeout)
+electionTimeoutRange = (5 * heartbeatTimeout, 10 * heartbeatTimeout)
 
 {-|
 Return a new election timeout
