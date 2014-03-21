@@ -123,8 +123,8 @@ doFollow vRaft endpoint member leading = do
                     case entries of
                         -- we can only have an empty list if we are at the beginning of the log
                         [] -> return $ createResult (-1 == aePreviousIndex req) raft
-                        (entry:_) -> let term = raftCurrentTerm raft
-                                         in return $ createResult (term == (entryTerm entry)) raft
+                        (_:rest) -> let term = raftCurrentTerm raft
+                                         in return $ createResult (term == (entryTerm $ last rest)) raft
     case maybeCommitted of
         Just committed ->  do
             -- what is good here is that since there is only 1 doFollow
@@ -146,6 +146,11 @@ Wait for request vote requests and process them
 -}
 doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> Bool -> IO ()
 doVote vRaft endpoint name leading = do
+    log <- atomically $ do
+        raft <- readTVar vRaft
+        return $ serverLog $ raftServer raft
+    logLastEntryIndex <- raftLastLogEntryIndex log
+    logLastEntryTerm <- raftLastLogEntryTerm log
     won <- onRequestVote endpoint name $ \req -> do
         debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
@@ -153,34 +158,39 @@ doVote vRaft endpoint name leading = do
             if (rvCandidateTerm req) < (raftCurrentTerm raft)
                 then return (raft,False,"Candidate term too old")
                 else do
+                    modifyTVar vRaft $ \oldRaft -> 
+                            let newTerm = max (raftCurrentTerm oldRaft) (rvCandidateTerm req)
+                            in setRaftTerm newTerm oldRaft
                     case raftLastCandidate raft of
                         Just candidate -> do
                             if (candidate == rvCandidate req)
                                 then return (raft,True,"Candidate already seen")
                                 else return (raft,False,"Already saw different candidate")
                         Nothing -> do
+                            modifyTVar vRaft $ \oldRaft -> 
+                                    setRaftLastCandidate (Just $ rvCandidate req) oldRaft
                             if name == rvCandidate req
                                 then return (raft,True,"Voting for self")
-                                else if logOutOfDate raft req
+                                else do
+                                    if candidateMoreUpToDate req logLastEntryTerm logLastEntryIndex
                                     then do
                                         modifyTVar vRaft $ \oldRaft -> 
-                                            let newTerm = max (raftCurrentTerm oldRaft) (rvCandidateTerm req)
-                                            in setRaftTerm newTerm
-                                                $ setRaftLastCandidate (Just $ rvCandidate req) oldRaft
+                                            setRaftLastCandidate (Just $ rvCandidate req) oldRaft
                                         return (raft,True,"Candidate log more up to date")
                                     else return (raft,False,"Candidate log out of date")
-        infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
+        infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " 
+            ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
         return $ createResult vote raft
     if leading && won
         then return ()
         else doVote vRaft endpoint name leading
     where
         -- check that candidate log is more up to date than this server's log
-        logOutOfDate raft req = if (rvCandidateLastEntryTerm req) > (raftCurrentTerm raft)
+        candidateMoreUpToDate req term index= if (rvCandidateLastEntryTerm req) > term
             then True
-            else if (rvCandidateLastEntryTerm req) < (raftCurrentTerm raft)
+            else if (rvCandidateLastEntryTerm req) < term
                     then False
-                    else (rvCandidateLastEntryIndex req) >= (lastAppended $ serverLog $ raftServer raft)
+                    else (rvCandidateLastEntryIndex req) >= index
 
 {-|
 Initiate an election, volunteering to lead the cluster if elected.
@@ -205,11 +215,7 @@ doVolunteer vRaft endpoint candidate = do
         term = raftCurrentTerm raft
         log = serverLog $ raftServer raft
         lastIndex = lastAppended log
-    lastEntries <- fetchEntries log lastIndex 1
-    let lastTerm = case lastEntries of
-            (entry:[]) -> entryTerm entry
-            (_:entries) -> entryTerm $ last entries
-            _ -> 0
+    lastTerm <- raftLastLogEntryTerm log
     debugM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
     votes <- goRequestVote cs members term candidate lastIndex lastTerm
     debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)

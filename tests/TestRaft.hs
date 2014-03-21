@@ -13,7 +13,8 @@
 -----------------------------------------------------------------------------
 
 module TestRaft (
-    tests
+    tests,
+    troubleshoot
 ) where
 
 -- local imports
@@ -65,12 +66,18 @@ tests = [
     testCase "withClientPerformAction" testWithClientPerformAction
     ]
 
+troubleshoot :: IO () -> IO ()
+troubleshoot fn = do
+    finally (do
+        updateGlobalLogger rootLoggerName (setLevel INFO)
+        fn) (updateGlobalLogger rootLoggerName (setLevel WARNING))
+
 test3Cluster :: Assertion
 test3Cluster = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
-        pause
+        pause >> pause
         _ <- checkForLeader (1 :: Integer) Nothing vRafts
         return ()
 
@@ -79,9 +86,9 @@ test3ClusterStability = do
     transport <- newMemoryTransport
     let cfg = newConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
-        pause
+        pause >> pause
         firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
-        pause
+        pause >> pause
         _ <- checkForLeader (2 :: Integer) firstLeader vRafts
         return ()
 

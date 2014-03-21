@@ -29,7 +29,7 @@ module Control.Consensus.Raft.Types (
     newRaft,
     RaftState(..),
     RaftServer,
-    RaftLog,
+    RaftLog(..),
     RaftLogEntry(..),
     Server(..),
     ServerState(..),
@@ -169,7 +169,9 @@ applyConfigurationAction initial _ = initial
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (LogIO l RaftLogEntry (ServerState v)) => RaftLog l v
+class (LogIO l RaftLogEntry (ServerState v)) => RaftLog l v where
+    raftLastLogEntryIndex :: l -> IO Index
+    raftLastLogEntryTerm :: l -> IO Term
 
 type Raft l v = TVar (RaftState l v)
 

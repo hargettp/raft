@@ -79,7 +79,20 @@ data IntLog = IntLog {
 
 instance LogIO IntLog RaftLogEntry (ServerState Int)
 
-instance RaftLog IntLog Int
+instance RaftLog IntLog Int where
+    -- raftLastLogEntryIndex :: l -> IO Index
+    raftLastLogEntryIndex log = do
+        return $ lastAppended log
+
+    -- raftLastLogEntryTerm :: l -> IO Term
+    raftLastLogEntryTerm log = do
+        let lastIndex = lastAppended log
+        lastEntries <- fetchEntries log lastIndex 1
+        let lastTerm = case lastEntries of
+                (entry:[]) -> entryTerm entry
+                (_:entries) -> entryTerm $ last entries
+                _ -> 0
+        return lastTerm
 
 newIntLog :: IO IntLog
 newIntLog = do
