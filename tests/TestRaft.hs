@@ -260,7 +260,7 @@ pause :: IO ()
 pause = threadDelay serverTimeout
 
 serverTimeout :: Timeout
-serverTimeout = 2 * 1000000
+serverTimeout = 10 * 1000000
 
 {-|
 Utility for running a server only for a defined period of time

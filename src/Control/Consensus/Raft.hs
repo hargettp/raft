@@ -97,11 +97,11 @@ doFollow vRaft endpoint member leading = do
     -- we sent earlier?
     maybeCommitted <- onAppendEntries endpoint member $ \req -> do
         debugM _log $ "Server " ++ member ++ " received " ++ (show req)
-        log <- atomically $ do
-            raft <- readTVar vRaft
-            return $ serverLog $ raftServer raft
+        infoM _log $ "Server " ++ member ++ " received pulse from " ++ (aeLeader req)
+        term <- do
+            raft <- atomically $ readTVar vRaft
+            raftLastLogEntryTerm $ serverLog $ raftServer raft
         -- grab these entries, because we can't do so inside the transaction
-        entries <- fetchEntries log (aePreviousIndex req) 1
         atomically $ do
             raft <-readTVar vRaft
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
@@ -120,11 +120,7 @@ doFollow vRaft endpoint member leading = do
                                     $ setRaftLastCandidate Nothing oldRaft
                             else return ()
                     -- now check that we're in sync
-                    case entries of
-                        -- we can only have an empty list if we are at the beginning of the log
-                        [] -> return $ createResult (-1 == aePreviousIndex req) raft
-                        (_:rest) -> let term = raftCurrentTerm raft
-                                         in return $ createResult (term == (entryTerm $ last rest)) raft
+                    return $ createResult (term == (aePreviousTerm req)) raft
     case maybeCommitted of
         Just committed ->  do
             -- what is good here is that since there is only 1 doFollow

@@ -211,7 +211,7 @@ onPerformAction endpoint member fn = do
 Expected delay (in microseconds) for group rpc's to complete
 -}
 rpcTimeout :: Timeout
-rpcTimeout = (150 * 1000)
+rpcTimeout = (500 * 1000)
 
 {-|
 Expected delay (in microseconds) between heartbeats

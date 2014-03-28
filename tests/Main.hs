@@ -8,6 +8,7 @@ import qualified TestRaft as R
 
 -- external imports
 
+import Control.Concurrent
 import System.Directory
 import System.Info
 import System.Log.Logger
@@ -39,6 +40,8 @@ printPlatform :: IO ()
 printPlatform = do
     putStrLn $ "OS: " ++ os ++ "/" ++ arch
     putStrLn $ "Compiler: " ++ compilerName ++ " " ++ (show compilerVersion)
+    capabilities <- getNumCapabilities
+    putStrLn $ "Capabilities: " ++ (show capabilities)
     putStrLn ""
 
 tests :: [Test.Framework.Test]
