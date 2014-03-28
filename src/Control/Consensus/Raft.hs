@@ -172,11 +172,11 @@ doVote vRaft endpoint name leading = do
                                 then return (raft,True,"Voting for self")
                                 else do
                                     if candidateMoreUpToDate req logLastEntryTerm logLastEntryIndex
-                                    then do
-                                        modifyTVar vRaft $ \oldRaft -> 
-                                            setRaftLastCandidate (Just $ rvCandidate req) oldRaft
-                                        return (raft,True,"Candidate log more up to date")
-                                    else return (raft,False,"Candidate log out of date")
+                                        then do
+                                            modifyTVar vRaft $ \oldRaft -> 
+                                                setRaftLastCandidate (Just $ rvCandidate req) oldRaft
+                                            return (raft,True,"Candidate log more up to date")
+                                        else return (raft,False,"Candidate log out of date")
         infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " 
             ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
         return $ createResult vote raft
