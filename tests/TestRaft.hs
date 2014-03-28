@@ -75,7 +75,7 @@ troubleshoot fn = do
 test3Cluster :: Assertion
 test3Cluster = do
     transport <- newMemoryTransport
-    let cfg = newConfiguration ["server1","server2","server3"]
+    let cfg = newTestConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
         pause >> pause
         _ <- checkForLeader (1 :: Integer) Nothing vRafts
@@ -84,7 +84,7 @@ test3Cluster = do
 test3ClusterStability :: Assertion
 test3ClusterStability = do
     transport <- newMemoryTransport
-    let cfg = newConfiguration ["server1","server2","server3"]
+    let cfg = newTestConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
         pause >> pause
         firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
@@ -95,7 +95,7 @@ test3ClusterStability = do
 test5Cluster :: Assertion
 test5Cluster = do
     transport <- newMemoryTransport
-    let cfg = newConfiguration ["server1","server2","server3","server4","server5"]
+    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
     with5Servers  transport cfg $ \vRafts -> do
         pause >> pause >> pause
         _ <- checkForLeader (1 :: Integer) Nothing vRafts
@@ -104,7 +104,7 @@ test5Cluster = do
 test5ClusterStability :: Assertion
 test5ClusterStability = do
     transport <- newMemoryTransport
-    let cfg = newConfiguration ["server1","server2","server3","server4","server5"]
+    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
     with5Servers  transport cfg $ \vRafts -> do
         pause >> pause >> pause
         firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
@@ -115,7 +115,7 @@ test5ClusterStability = do
 testClient :: Assertion
 testClient = do
     transport <- newMemoryTransport
-    let cfg = newConfiguration ["server1","server2","server3"]
+    let cfg = newTestConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \_ -> do
         pause
         Right clientResult <- race (threadDelay $ 1 * serverTimeout)
@@ -144,7 +144,8 @@ testPerformAction = do
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
         action = Cmd $ encode $ Add 1
-    Just msg <- callWithTimeout cs server "performAction" rpcTimeout $ encode action
+        outs = defaultTimeouts
+    Just msg <- callWithTimeout cs server "performAction" (timeoutRpc outs) $ encode action
     let Right result = decode msg
     assertBool "Result should be true" $ memberActionSuccess result
 
@@ -171,7 +172,8 @@ testGoPerformAction = do
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
         action = Cmd $ encode $ Add 1
-    response <- goPerformAction cs server action
+        cfg = (newTestConfiguration [server]) {configurationLeader = Just server}
+    response <- goPerformAction cs cfg server action
     case response of
         Just result -> assertBool "Result should be true" $ memberActionSuccess result
         Nothing -> assertBool "No response" False
@@ -180,7 +182,7 @@ testClientPerformAction :: Assertion
 testClientPerformAction = do
     let client = "client1"
         server = "server1"
-        cfg = newConfiguration [server]
+        cfg = newTestConfiguration [server]
     transport <- newMemoryTransport
     _ <- async $ do
         endpoint <- newEndpoint [transport]
@@ -204,7 +206,7 @@ testWithClientPerformAction :: Assertion
 testWithClientPerformAction = do
     let client = "client1"
         server = "server1"
-        cfg = newConfiguration [server]
+        cfg = newTestConfiguration [server]
     transport <- newMemoryTransport
     _ <- async $ do
         endpoint <- newEndpoint [transport]
@@ -256,11 +258,17 @@ withClient transport name cfg fn = do
     let client = newClient endpoint name cfg
     fn client
 
+newTestConfiguration :: [ServerId] -> Configuration
+newTestConfiguration members = (newConfiguration members) {configurationTimeouts = testTimeouts}
+
 pause :: IO ()
 pause = threadDelay serverTimeout
 
+testTimeouts :: Timeouts
+testTimeouts = timeouts $ 500 * 1000
+
 serverTimeout :: Timeout
-serverTimeout = 10 * 1000000
+serverTimeout = 20 * (timeoutRpc testTimeouts)
 
 {-|
 Utility for running a server only for a defined period of time

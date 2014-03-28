@@ -95,7 +95,10 @@ doFollow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> Boo
 doFollow vRaft endpoint member leading = do
     -- TOD what if we're the leader and we're processing a message
     -- we sent earlier?
-    maybeCommitted <- onAppendEntries endpoint member $ \req -> do
+    cfg <- atomically $ do
+        raft <- readTVar vRaft
+        return $ serverConfiguration $ serverState $ raftServer raft
+    maybeCommitted <- onAppendEntries endpoint cfg member $ \req -> do
         debugM _log $ "Server " ++ member ++ " received " ++ (show req)
         infoM _log $ "Server " ++ member ++ " received pulse from " ++ (aeLeader req)
         term <- do
@@ -115,10 +118,10 @@ doFollow vRaft endpoint member leading = do
                                 $ setRaftLastCandidate Nothing oldRaft
                         else if ((aeLeaderTerm req) == (raftCurrentTerm raft)) &&
                                     Nothing == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
-                            then modifyTVar vRaft $ \oldRaft ->
-                                setRaftLeader (Just $ aeLeader req)
-                                    $ setRaftLastCandidate Nothing oldRaft
-                            else return ()
+                                then modifyTVar vRaft $ \oldRaft ->
+                                    setRaftLeader (Just $ aeLeader req)
+                                        $ setRaftLastCandidate Nothing oldRaft
+                                else return ()
                     -- now check that we're in sync
                     return $ createResult (term == (aePreviousTerm req)) raft
     case maybeCommitted of
@@ -206,14 +209,15 @@ doVolunteer vRaft endpoint candidate = do
                 $ setRaftLastCandidate Nothing oldRaft
         readTVar vRaft
     infoM _log $ "Server " ++ candidate ++ " volunteering in term " ++ (show $ raftCurrentTerm raft)
-    let members = clusterMembers $ serverConfiguration $ serverState $ raftServer raft
+    let cfg = serverConfiguration $ serverState $ raftServer raft
+        members = clusterMembers cfg
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
         log = serverLog $ raftServer raft
         lastIndex = lastAppended log
     lastTerm <- raftLastLogEntryTerm log
     debugM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
-    votes <- goRequestVote cs members term candidate lastIndex lastTerm
+    votes <- goRequestVote cs cfg term candidate lastIndex lastTerm
     debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)
     return $ wonElection votes
     where
@@ -235,7 +239,8 @@ lead vRaft endpoint name = do
                 $ setRaftLeader (Just name)
                 $ setRaftLastCandidate Nothing oldRaft
         readTVar vRaft
-    let members = clusterMembersOnly $ serverConfiguration $ serverState $ raftServer raft
+    let cfg = serverConfiguration $ serverState $ raftServer raft
+        members = clusterMembersOnly cfg
         leader = name
         term = raftCurrentTerm raft
     infoM _log $ "Server " ++ name ++ " leading in new term " ++ (show term)
@@ -256,6 +261,7 @@ lead vRaft endpoint name = do
             index <- atomically $ takeTMVar lastIndex
             raft <- atomically $ readTVar vRaft
             let server = raftServer raft
+                cfg = serverConfiguration $ serverState server
                 leader = serverId server
                 log = serverLog server
                 appended = lastAppended log
@@ -266,12 +272,12 @@ lead vRaft endpoint name = do
             infoM _log $ "Server " ++ leader ++ " notifying member " ++ member ++ " in term " ++ (show term)
             start <- getCPUTime
             response <- case previousEntries of
-                [] -> goAppendEntries cs member leader term prevLogIndex (-1) index entries
+                [] -> goAppendEntries cs cfg member term prevLogIndex (-1) index entries
                 _ -> let prevTerm = entryTerm $ last previousEntries
-                                     in goAppendEntries cs member leader term prevLogIndex prevTerm index entries
+                                     in goAppendEntries cs cfg member term prevLogIndex prevTerm index entries
             stop <- getCPUTime
             let diff =  quot (stop - start) 1000000 -- 1 million picoseconds in a microsecond
-            if diff > toInteger rpcTimeout
+            if diff > (toInteger $ timeoutRpc $ configurationTimeouts cfg)
                 then warningM _log $ "Elapsed time longer than rpcTimeout from " ++ leader ++ " to " ++ member ++ ": " ++ (show diff)
                 else return ()
             case response of
@@ -294,11 +300,12 @@ lead vRaft endpoint name = do
 doPulse :: (RaftLog l v) => TVar (RaftState l v) -> ServerId -> [Follower] -> IO ()
 doPulse vRaft name followers = do
     raft <- atomically $ readTVar vRaft
-    if Just name == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
+    let cfg = serverConfiguration $ serverState $ raftServer raft
+    if Just name == (clusterLeader cfg)
         then do
             let index = lastCommitted $ serverLog $ raftServer raft
             mapM_ (pulse index) followers
-            threadDelay pulseTimeout
+            threadDelay $ timeoutPulse $ configurationTimeouts $ cfg
             doPulse vRaft name followers
         else return ()
     where

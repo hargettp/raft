@@ -24,6 +24,10 @@ module Control.Consensus.Raft.Types (
     ServerId,
     Term,
     Timeout,
+    Timeouts(..),
+    defaultTimeouts,
+    timeouts,
+    electionTimeout,
     -- * Raft state
     Raft,
     newRaft,
@@ -71,6 +75,8 @@ import GHC.Generics
 
 import Network.Endpoints
 
+import qualified System.Random as R
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -78,10 +84,59 @@ type Term = Int
 
 type ServerId = Name
 
+--------------------------------------------------------------------------------
+-- Timeouts
+--------------------------------------------------------------------------------
+
 {-|
 Type used for timeouts.  Mostly used for code clarity.
 -}
 type Timeout = Int
+
+{-|
+Defines the timeouts used for various aspects of the Raft protocol.
+Different environments may have different performance characteristics,
+and thus require different timeout values to operate correctly.
+-}
+data Timeouts = Timeouts {
+    timeoutRpc :: Timeout,
+    timeoutHeartbeat :: Timeout,
+    timeoutPulse :: Timeout,
+    timeoutElectionRange :: (Timeout,Timeout)
+} deriving (Eq,Show,Generic)
+
+instance Serialize Timeouts
+
+{-|
+Returns default timeouts generally expected to be useful
+in real-world environments, largely based on original Raft paper.
+-}
+defaultTimeouts :: Timeouts 
+defaultTimeouts = timeouts $ 150 * 1000
+
+{-|
+Returns timeouts scaled from the provided RPC timeout.
+
+-}
+timeouts :: Timeout -> Timeouts
+timeouts rpc = 
+    let heartbeat = 4 * rpc
+        in Timeouts {
+            timeoutRpc = rpc,
+            timeoutHeartbeat = heartbeat,
+            timeoutPulse = 3 * rpc,
+            timeoutElectionRange = (5 * heartbeat,10 * heartbeat)
+}
+
+{-|
+Return a new election timeout
+-}
+electionTimeout :: Timeouts -> IO Timeout
+electionTimeout outs = R.randomRIO $ timeoutElectionRange outs
+
+--------------------------------------------------------------------------------
+-- Cofiguration
+--------------------------------------------------------------------------------
 
 {- |
 A configuration identifies all the members of a cluster and the nature of their participation 
@@ -90,7 +145,8 @@ in the cluster.
 data Configuration = Configuration {
           configurationLeader :: Maybe ServerId,
           configurationParticipants :: S.Set ServerId,
-          configurationObservers :: S.Set ServerId
+          configurationObservers :: S.Set ServerId,
+          configurationTimeouts :: Timeouts
           }
           | JointConfiguration {
           jointOldConfiguration :: Configuration,
@@ -103,7 +159,8 @@ newConfiguration :: [ServerId] -> Configuration
 newConfiguration participants = Configuration {
     configurationLeader = Nothing,
     configurationParticipants = S.fromList participants,
-    configurationObservers = S.empty
+    configurationObservers = S.empty,
+    configurationTimeouts = defaultTimeouts
 }
 
 clusterLeader :: Configuration -> Maybe ServerId
@@ -111,7 +168,7 @@ clusterLeader Configuration {configurationLeader = leaderId} = leaderId
 clusterLeader (JointConfiguration _ configuration) = clusterLeader configuration
 
 clusterMembers :: Configuration -> [ServerId]
-clusterMembers (Configuration _ participants observers) = S.toList $ S.union participants observers
+clusterMembers (Configuration _ participants observers _) = S.toList $ S.union participants observers
 clusterMembers (JointConfiguration jointOld jointNew) = S.toList $ S.fromList $ clusterMembers jointOld ++ (clusterMembers jointNew)
 
 clusterMembersOnly :: Configuration -> [ServerId]
@@ -120,7 +177,7 @@ clusterMembersOnly cfg = case clusterLeader cfg of
     Nothing -> clusterMembers cfg
 
 addClusterParticipants :: Configuration -> [ServerId] -> Configuration
-addClusterParticipants cfg@(Configuration _ _ _) participants = cfg {
+addClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
     configurationParticipants = S.union (configurationParticipants cfg) $ S.fromList participants
     }
 addClusterParticipants (JointConfiguration jointOld jointNew) participants = JointConfiguration {
@@ -129,7 +186,7 @@ addClusterParticipants (JointConfiguration jointOld jointNew) participants = Joi
     }
 
 removeClusterParticipants :: Configuration -> [ServerId] -> Configuration
-removeClusterParticipants cfg@(Configuration _ _ _) participants = cfg {
+removeClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
     configurationParticipants = S.difference (configurationParticipants cfg) $ S.fromList participants
     }
 removeClusterParticipants (JointConfiguration jointOld jointNew) participants = JointConfiguration {
@@ -138,7 +195,7 @@ removeClusterParticipants (JointConfiguration jointOld jointNew) participants = 
     }
 
 addClusterObservers :: Configuration -> [ServerId] -> Configuration
-addClusterObservers cfg@(Configuration _ _ _) observers = cfg {
+addClusterObservers cfg@(Configuration _ _ _ _) observers = cfg {
     configurationObservers = S.union (configurationObservers cfg) $ S.fromList observers
     }
 addClusterObservers (JointConfiguration jointOld jointNew) observers = JointConfiguration {
@@ -147,7 +204,7 @@ addClusterObservers (JointConfiguration jointOld jointNew) observers = JointConf
     }
 
 removeClusterObservers :: Configuration -> [ServerId] -> Configuration
-removeClusterObservers cfg@(Configuration _ _ _) observers = cfg {
+removeClusterObservers cfg@(Configuration _ _ _ _) observers = cfg {
     configurationObservers = S.union (configurationObservers cfg) $ S.fromList observers
     }
 removeClusterObservers (JointConfiguration jointOld jointNew) observers = JointConfiguration {

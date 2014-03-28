@@ -67,17 +67,17 @@ performAction client action = do
             Nothing -> []
         members = leader ++ (clusterMembers cfg)
         cs = (newCallSite (clientEndpoint client) (clientName client))
-    perform cs members members
+    perform cs cfg members members
     where
-        perform cs members [] = do
+        perform cs cfg members [] = do
             infoM _log $ "Client " ++ (clientName client) ++ " can't find any members"
             -- timeout in case there are issues
             threadDelay $ 100 * 1000
             infoM _log $ "Client " ++ (clientName client) ++ " searching again for members"
-            perform cs members members
-        perform cs members (leader:others) = do
+            perform cs cfg members members
+        perform cs cfg members (leader:others) = do
             infoM _log $ "Client " ++ (clientName client) ++ " sending action " ++ (show action) ++ " to " ++ leader
-            maybeResult <- goPerformAction cs leader action
+            maybeResult <- goPerformAction cs cfg leader action
             infoM _log $ "Client " ++ (clientName client) ++ " sent action " ++ (show action) ++ " to " ++ leader
             infoM _log $ "Client " ++ (clientName client) ++ " received response " ++ (show maybeResult)
             case maybeResult of
@@ -85,7 +85,7 @@ performAction client action = do
                     then return $ memberLastCommitted result
                     else case memberLeader result of
                         -- follow the redirect to the correct leader
-                        Just newLeader -> perform cs members (newLeader:others)
+                        Just newLeader -> perform cs cfg members (newLeader:others)
                         -- keep trying the others until a leader is found
-                        Nothing -> perform cs members others
-                Nothing ->  perform cs members others
+                        Nothing -> perform cs cfg members others
+                Nothing ->  perform cs cfg members others

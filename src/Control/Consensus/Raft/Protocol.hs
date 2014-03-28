@@ -39,12 +39,6 @@ module Control.Consensus.Raft.Protocol (
     onAppendEntries,
     onRequestVote,
 
-    -- * Timeouts
-    electionTimeout,
-    heartbeatTimeout,
-    pulseTimeout,
-    rpcTimeout
-
 ) where
 
 -- local imports
@@ -63,7 +57,6 @@ import Network.Endpoints
 import Network.RPC
 
 import System.Log.Logger
-import qualified System.Random as R
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -114,16 +107,17 @@ methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
 goAppendEntries :: CallSite
+            -> Configuration            -- ^^ Cluster configuration
             -> Name                     -- ^^ Member that is target of the call
-            -> ServerId                 -- ^^ Leader
             -> Term                     -- ^^ Leader's current term
             -> Index                    -- ^^ Log index of entry just prior to the entries being appended
             -> Term                     -- ^^ Term of entry just priot to the entries being appended
             -> Index                    -- ^^ Last index up to which all entries are committed on leader
             -> [RaftLogEntry]    -- ^^ Entries to append
             -> IO (Maybe MemberResult)
-goAppendEntries cs member leader term prevLogIndex prevTerm commitIndex entries = do
-    response <- callWithTimeout cs member methodAppendEntries rpcTimeout
+goAppendEntries cs cfg member term prevLogIndex prevTerm commitIndex entries = do
+    let Just leader = clusterLeader cfg
+    response <- callWithTimeout cs member methodAppendEntries (timeoutRpc $ configurationTimeouts cfg)
         $ encode $ AppendEntries leader term prevLogIndex prevTerm commitIndex entries
     case response of
         Just bytes -> let Right results = decode bytes
@@ -133,14 +127,16 @@ goAppendEntries cs member leader term prevLogIndex prevTerm commitIndex entries 
 methodRequestVote :: String
 methodRequestVote = "requestVote"
 
-goRequestVote :: CallSite -> [Name]
+goRequestVote :: CallSite 
+                -> Configuration -- ^^ Cluster configuration
                 -> Term     -- ^^ Candidate's term
                 -> ServerId -- ^^ Candidate's id
                 -> Index    -- ^^ Index of candidate's last entry
                 -> Term     -- ^^ Term of candidate's last entry
                 -> IO (M.Map Name (Maybe MemberResult))
-goRequestVote cs members term candidate lastIndex lastTerm = do
-    timeout <- electionTimeout
+goRequestVote cs cfg term candidate lastIndex lastTerm = do
+    let members = clusterMembers cfg
+    timeout <- electionTimeout $ configurationTimeouts cfg
     results <- gcallWithTimeout cs members methodRequestVote timeout
         $ encode $ RequestVote candidate term lastIndex lastTerm
     return $ mapResults results
@@ -154,11 +150,12 @@ methodPerformAction :: String
 methodPerformAction = "performAction"
 
 goPerformAction :: CallSite
+                    -> Configuration
                     -> ServerId
                     -> Action
                     -> IO (Maybe MemberResult)
-goPerformAction cs member action = do
-    maybeMsg <- callWithTimeout cs member methodPerformAction (4 * rpcTimeout) $ encode action
+goPerformAction cs cfg member action = do
+    maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutRpc $ configurationTimeouts cfg) $ encode action
     case maybeMsg of
         Just msg -> case decode msg of
                         Right result -> return $ Just result
@@ -169,9 +166,9 @@ goPerformAction cs member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Maybe Index)
-onAppendEntries endpoint server fn = do
-    msg <- hearTimeout endpoint server methodAppendEntries heartbeatTimeout
+onAppendEntries :: Endpoint -> Configuration -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Maybe Index)
+onAppendEntries endpoint cfg server fn = do
+    msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ configurationTimeouts cfg)
     case msg of
         Just (bytes,reply) -> do
             let Right req = decode bytes
@@ -202,38 +199,3 @@ onPerformAction endpoint member fn = do
     response <- fn action
     reply $ encode response
     return ()
-
---------------------------------------------------------------------------------
--- Timeouts
---------------------------------------------------------------------------------
-
-{-|
-Expected delay (in microseconds) for group rpc's to complete
--}
-rpcTimeout :: Timeout
-rpcTimeout = (500 * 1000)
-
-{-|
-Expected delay (in microseconds) between heartbeats
--}
-heartbeatTimeout :: Timeout
-heartbeatTimeout = (4 * rpcTimeout)
-
-{-|
-Maximum delay leader waits for a new message to process before
-preparing heartbeat
--}
-pulseTimeout :: Timeout
-pulseTimeout = (3 * rpcTimeout)
-
-{-|
-Range for choosing an election timeout
--}
-electionTimeoutRange :: (Timeout,Timeout)
-electionTimeoutRange = (5 * heartbeatTimeout, 10 * heartbeatTimeout)
-
-{-|
-Return a new election timeout
--}
-electionTimeout :: IO Timeout
-electionTimeout = R.randomRIO electionTimeoutRange
