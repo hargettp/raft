@@ -118,7 +118,7 @@ testClient = do
     let cfg = newTestConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \_ -> do
         pause
-        Right clientResult <- race (threadDelay $ 1 * serverTimeout)
+        Right clientResult <- race (pause >> pause)
             (withClient transport "client1" cfg $ \client -> do
                                 pause
                                 performAction client $ Cmd $ encode $ Add 1)
@@ -265,7 +265,8 @@ pause :: IO ()
 pause = threadDelay serverTimeout
 
 testTimeouts :: Timeouts
-testTimeouts = timeouts $ 500 * 1000
+-- testTimeouts = timeouts $ 500 * 1000
+testTimeouts = timeouts $ 25 * 1000
 
 serverTimeout :: Timeout
 serverTimeout = 20 * (timeoutRpc testTimeouts)
