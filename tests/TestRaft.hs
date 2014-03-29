@@ -265,7 +265,7 @@ pause :: IO ()
 pause = threadDelay serverTimeout
 
 testTimeouts :: Timeouts
-testTimeouts = defaultTimeouts
+testTimeouts = timeouts (50 * 1000)
 
 -- We need this to be high enough that members
 -- can complete their election processing (that's the longest timeout we have)
