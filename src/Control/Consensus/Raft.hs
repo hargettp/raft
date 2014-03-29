@@ -225,9 +225,7 @@ doVolunteer vRaft endpoint candidate = do
         wonElection votes = majority votes $ M.foldl (\tally ballot -> 
             case ballot of
                 Just (result) -> if (memberActionSuccess result) then tally + 1 else tally 
-                _ -> tally
-            )
-            0 votes
+                _ -> tally) 0 votes
         majority :: M.Map Name (Maybe MemberResult) -> Int -> Bool
         majority votes tally = tally > ((M.size $ votes) `quot` 2)
 

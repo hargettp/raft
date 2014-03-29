@@ -265,11 +265,15 @@ pause :: IO ()
 pause = threadDelay serverTimeout
 
 testTimeouts :: Timeouts
--- testTimeouts = timeouts $ 500 * 1000
-testTimeouts = timeouts $ 25 * 1000
+testTimeouts = defaultTimeouts
 
+-- We need this to be high enough that members
+-- can complete their election processing (that's the longest timeout we have)
+-- before the test itself completes--otherwise we occasionally get spurious
+-- failures, as a member is still electing when the test ends, resulting
+-- in test failures, because not all members have agreed on the same leader
 serverTimeout :: Timeout
-serverTimeout = 20 * (timeoutRpc testTimeouts)
+serverTimeout = 2 * (snd $ timeoutElectionRange testTimeouts)
 
 {-|
 Utility for running a server only for a defined period of time
