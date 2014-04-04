@@ -18,7 +18,8 @@ module TestLog (
 
 -- local imports
 
-import Control.Consensus.Raft.Types
+import Control.Consensus.Raft.Configuration
+import Control.Consensus.Raft.State
 
 import IntServer
 

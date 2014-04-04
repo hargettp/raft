@@ -25,7 +25,7 @@ module Control.Consensus.Raft.Client (
 
 import Control.Concurrent
 import Control.Consensus.Log
-import Control.Consensus.Raft.Types
+import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Protocol
 
 -- external imports
