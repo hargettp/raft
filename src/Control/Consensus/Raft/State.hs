@@ -25,6 +25,7 @@ module Control.Consensus.Raft.State (
     RaftServer,
     RaftLog(..),
     RaftLogEntry(..),
+    RaftTime(..),
     Server(..),
     ServerState(..),
     setRaftTerm,
@@ -52,11 +53,18 @@ import GHC.Generics
 --------------------------------------------------------------------------------
 
 {-|
+`RaftTime` captures a measure of how up to date a log is.
+-}
+data RaftTime = RaftTime Term Index deriving (Show,Eq,Ord,Generic)
+
+instance Serialize RaftTime
+
+{-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
 class (LogIO l RaftLogEntry (ServerState v)) => RaftLog l v where
-    raftLastLogEntryIndex :: l -> IO Index
-    raftLastLogEntryTerm :: l -> IO Term
+    logLastAppendedTime :: l -> RaftTime
+    logLastCommittedTime :: l -> RaftTime
 
 type Raft l v = TVar (RaftState l v)
 

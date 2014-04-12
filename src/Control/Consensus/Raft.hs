@@ -103,9 +103,6 @@ doFollow vRaft endpoint member leading = do
     maybeCommitted <- onAppendEntries endpoint cfg member $ \req -> do
         debugM _log $ "Server " ++ member ++ " received " ++ (show req)
         infoM _log $ "Server " ++ member ++ " received pulse from " ++ (aeLeader req)
-        term <- do
-            raft <- atomically $ readTVar vRaft
-            raftLastLogEntryTerm $ serverLog $ raftServer raft
         -- grab these entries, because we can't do so inside the transaction
         atomically $ do
             raft <-readTVar vRaft
@@ -124,8 +121,8 @@ doFollow vRaft endpoint member leading = do
                                     setRaftLeader (Just $ aeLeader req)
                                         $ setRaftLastCandidate Nothing oldRaft
                                 else return ()
-                    -- now check that we're in sync
-                    return $ createResult (term == (aePreviousTerm req)) raft
+                    -- we assume terms are equal if we're here
+                    return $ createResult True raft
     case maybeCommitted of
         Just committed ->  do
             -- what is good here is that since there is only 1 doFollow
@@ -150,8 +147,7 @@ doVote vRaft endpoint name leading = do
     log <- atomically $ do
         raft <- readTVar vRaft
         return $ serverLog $ raftServer raft
-    logLastEntryIndex <- raftLastLogEntryIndex log
-    logLastEntryTerm <- raftLastLogEntryTerm log
+    let logLastEntryTime = logLastAppendedTime log
     won <- onRequestVote endpoint name $ \req -> do
         debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
@@ -173,25 +169,18 @@ doVote vRaft endpoint name leading = do
                             if name == rvCandidate req
                                 then return (raft,True,"Voting for self")
                                 else do
-                                    if candidateMoreUpToDate req logLastEntryTerm logLastEntryIndex
+                                    if (rvCandidateLastEntryTime req) >= logLastEntryTime
                                         then do
                                             modifyTVar vRaft $ \oldRaft -> 
                                                 setRaftLastCandidate (Just $ rvCandidate req) oldRaft
                                             return (raft,True,"Candidate log more up to date")
                                         else return (raft,False,"Candidate log out of date")
-        infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is " 
+        infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is "
             ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
         return $ createResult vote raft
     if leading && won
         then return ()
         else doVote vRaft endpoint name leading
-    where
-        -- check that candidate log is more up to date than this server's log
-        candidateMoreUpToDate req term index= if (rvCandidateLastEntryTerm req) > term
-            then True
-            else if (rvCandidateLastEntryTerm req) < term
-                    then False
-                    else (rvCandidateLastEntryIndex req) >= index
 
 {-|
 Initiate an election, volunteering to lead the cluster if elected.
@@ -217,9 +206,9 @@ doVolunteer vRaft endpoint candidate = do
         term = raftCurrentTerm raft
         log = serverLog $ raftServer raft
         lastIndex = lastAppended log
-    lastTerm <- raftLastLogEntryTerm log
+        RaftTime lastTerm _ = logLastAppendedTime log
     debugM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
-    votes <- goRequestVote cs cfg term candidate lastIndex lastTerm
+    votes <- goRequestVote cs cfg term candidate (RaftTime lastTerm lastIndex)
     debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)
     return $ wonElection votes
     where
@@ -272,9 +261,9 @@ lead vRaft endpoint name = do
             infoM _log $ "Server " ++ leader ++ " notifying member " ++ member ++ " in term " ++ (show term)
             start <- getCPUTime
             response <- case previousEntries of
-                [] -> goAppendEntries cs cfg member term prevLogIndex (-1) index entries
+                [] -> goAppendEntries cs cfg member term (RaftTime (-1) prevLogIndex)  index entries
                 _ -> let prevTerm = entryTerm $ last previousEntries
-                                     in goAppendEntries cs cfg member term prevLogIndex prevTerm index entries
+                                     in goAppendEntries cs cfg member term (RaftTime prevTerm prevLogIndex) index entries
             stop <- getCPUTime
             let diff =  quot (stop - start) 1000000 -- 1 million picoseconds in a microsecond
             if diff > (toInteger $ timeoutRpc $ configurationTimeouts cfg)

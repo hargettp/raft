@@ -69,8 +69,7 @@ _log = "raft.protocol"
 data AppendEntries =  AppendEntries {
     aeLeader :: ServerId,
     aeLeaderTerm :: Term,
-    aePreviousIndex :: Index,
-    aePreviousTerm :: Term,
+    aePreviousTime :: RaftTime,
     aeCommittedIndex :: Index,
     aeEntries :: [RaftLogEntry]
 } deriving (Eq,Show,Generic)
@@ -80,8 +79,7 @@ instance Serialize AppendEntries
 data RequestVote = RequestVote {
         rvCandidate :: ServerId,
         rvCandidateTerm :: Term,
-        rvCandidateLastEntryIndex :: Index,
-        rvCandidateLastEntryTerm :: Term
+        rvCandidateLastEntryTime :: RaftTime
 } deriving (Eq,Show,Generic)
 
 instance Serialize RequestVote
@@ -112,15 +110,14 @@ goAppendEntries :: CallSite
             -> Configuration            -- ^^ Cluster configuration
             -> Name                     -- ^^ Member that is target of the call
             -> Term                     -- ^^ Leader's current term
-            -> Index                    -- ^^ Log index of entry just prior to the entries being appended
-            -> Term                     -- ^^ Term of entry just priot to the entries being appended
+            -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
             -> Index                    -- ^^ Last index up to which all entries are committed on leader
             -> [RaftLogEntry]    -- ^^ Entries to append
             -> IO (Maybe MemberResult)
-goAppendEntries cs cfg member term prevLogIndex prevTerm commitIndex entries = do
+goAppendEntries cs cfg member term prevTime commitIndex entries = do
     let Just leader = clusterLeader cfg
     response <- callWithTimeout cs member methodAppendEntries (timeoutRpc $ configurationTimeouts cfg)
-        $ encode $ AppendEntries leader term prevLogIndex prevTerm commitIndex entries
+        $ encode $ AppendEntries leader term prevTime commitIndex entries
     case response of
         Just bytes -> let Right results = decode bytes
                       in return $ Just results
@@ -133,14 +130,13 @@ goRequestVote :: CallSite
                 -> Configuration -- ^^ Cluster configuration
                 -> Term     -- ^^ Candidate's term
                 -> ServerId -- ^^ Candidate's id
-                -> Index    -- ^^ Index of candidate's last entry
-                -> Term     -- ^^ Term of candidate's last entry
+                -> RaftTime -- ^^ `RaftTime` of candidate's last entry
                 -> IO (M.Map Name (Maybe MemberResult))
-goRequestVote cs cfg term candidate lastIndex lastTerm = do
+goRequestVote cs cfg term candidate lastEntryTime = do
     let members = clusterMembers cfg
     timeout <- electionTimeout $ configurationTimeouts cfg
     results <- gcallWithTimeout cs members methodRequestVote timeout
-        $ encode $ RequestVote candidate term lastIndex lastTerm
+        $ encode $ RequestVote candidate term lastEntryTime
     return $ mapResults results
     where
         mapResults results = M.map (\msg ->
