@@ -99,7 +99,7 @@ newIntLog = do
 
 instance Log IntLog IO RaftLogEntry (ServerState Int) where
 
-    newLog = newIntLog
+    mkLog = newIntLog
 
     lastCommitted log = numberLogLastCommittedIndex log
 

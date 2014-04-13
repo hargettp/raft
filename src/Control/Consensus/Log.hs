@@ -60,7 +60,7 @@ methods are wrapped in a monad to support those implementations that may not be-
 as a log whose entries are read from disk.
 -}
 class Log l m e s | l -> e,l -> s, l -> m where
-    newLog :: m l
+    mkLog :: m l
     lastCommitted :: l -> Index
     lastAppended :: l -> Index
     appendEntries :: l -> Index -> [e] -> m l
