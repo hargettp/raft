@@ -45,7 +45,7 @@ module Control.Consensus.Raft.Protocol (
 
 import Control.Consensus.Log
 import Control.Consensus.Raft.Configuration
-import Control.Consensus.Raft.State
+import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Types
 
 -- external imports

@@ -17,7 +17,7 @@
 --
 -----------------------------------------------------------------------------
 
-module Control.Consensus.Raft.State (
+module Control.Consensus.Raft.Log (
     -- * Raft state
     Raft,
     newRaft,

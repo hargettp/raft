@@ -4,13 +4,13 @@
 name:                raft
 version:             0.1.0.0
 synopsis:            Haskell implementation of Raft consensus algorithm
--- description:         
+-- description:
 homepage:            https://github.com/hargettp/raft
 license:             MIT
 license-file:        LICENSE
 author:              Phil Hargett
 maintainer:          phil@haphazardhouse.net
--- copyright:           
+-- copyright:
 category:            Control
 build-type:          Simple
 extra-source-files:  README.md
@@ -21,12 +21,14 @@ library
   exposed-modules:     
                        Control.Consensus.Log,
                        Control.Consensus.Raft, 
-                       Control.Consensus.Raft.Client, 
-                       Control.Consensus.Raft.Protocol, 
+                       Control.Consensus.Raft.Client,
+                       Control.Consensus.Raft.Configuration,
+                       Control.Consensus.Raft.Log,
+                       Control.Consensus.Raft.Protocol,
                        Control.Consensus.Raft.Types
 
-  -- other-modules:       
-  other-extensions:    
+  -- other-modules:
+  other-extensions:
                        ExistentialQuantification, 
                        ScopedTypeVariables, 
                        FlexibleContexts, 
@@ -36,7 +38,7 @@ library
                        DeriveDataTypeable, 
                        FunctionalDependencies, 
                        FlexibleInstances
-  build-depends:       
+  build-depends:
                        base >=4.6 && <4.8, 
                        directory >=1.2 && <1.3, 
                        async >=2.0 && <2.1, 
@@ -52,12 +54,12 @@ Test-Suite test-raft
     type: exitcode-stdio-1.0
     hs-source-dirs: tests
     main-is: Main.hs
-    build-depends: 
+    build-depends:
 
         -- base modules
-        base, 
+        base,
         -- testing support
-        HUnit, 
+        HUnit,
         test-framework,
         test-framework-hunit,
         -- Cabal,
