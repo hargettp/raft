@@ -24,7 +24,7 @@ module IntServer (
     IntLog,
     newIntLog,
     IntServer,
-    newIntServer
+    mkIntServer
 ) where
 
 -- local imports
@@ -121,13 +121,10 @@ instance Log IntLog RaftTime IO RaftLogEntry (ServerState Int) where
         if index > committed
             then do
                 let nextCommitted = committed + 1
-                uncommitted <- fetch nextCommitted (index - committed)
+                uncommitted <- fetchEntries log (RaftTime term nextCommitted) (index - committed)
                 commit nextCommitted uncommitted initialState
             else return (log,initialState)
         where
-            fetch start count = do
-                let existing = numberLogEntries log
-                return $ take count $ drop start existing
             commit  nextCommitted [] oldState = do
                 return (log {
                         numberLogLastCommitted = RaftTime term (nextCommitted - 1)
@@ -142,8 +139,8 @@ type IntServer = RaftServer IntLog Int
 
 type IntRaft = Raft IntLog Int
 
-newIntServer :: Configuration -> ServerId -> Int -> IO IntServer
-newIntServer cfg sid initial = do
+mkIntServer :: Configuration -> ServerId -> Int -> IO IntServer
+mkIntServer cfg sid initial = do
     log <- newIntLog
     return Server {
         serverId = sid,

@@ -285,7 +285,7 @@ withServer :: Transport -> Configuration -> ServerId -> (IntRaft -> IO ()) -> IO
 withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
-    server <- newIntServer cfg name 0
+    server <- mkIntServer cfg name 0
     finally (withConsensus endpoint server fn)
         (unbindEndpoint_ endpoint name)
 
