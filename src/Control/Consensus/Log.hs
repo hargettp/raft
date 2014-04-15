@@ -68,7 +68,7 @@ class Log l t m e s | l -> t,l -> e,l -> s,l -> m where
     fetchEntries :: l -> t -> Int -> m [e]
     commitEntries :: l -> t -> s -> m (l,s)
 
-class (Ord t,Eq t) => LogTime t where
+class (Ord t) => LogTime t where
     logIndex :: t -> Index
 
 {-|
