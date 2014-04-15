@@ -20,7 +20,8 @@ module Control.Consensus.Log (
 
     Index,
     Log(..),
-    LogIO
+    LogIO,
+    LogTime(..)
 
 ) where
 
@@ -66,6 +67,9 @@ class Log l m e s | l -> e,l -> s, l -> m where
     appendEntries :: l -> Index -> [e] -> m l
     fetchEntries :: l -> Index -> Int -> m [e]
     commitEntries :: l -> Index -> s -> m (l,s)
+
+class (Ord t,Eq t) => LogTime t where
+    logIndex :: t -> Index
 
 {-|
 Variant of 'Log' useful for implementations that need to perform 'IO'.
