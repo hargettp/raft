@@ -74,50 +74,50 @@ instance Serialize IntLogEntry
 
 data IntLog = IntLog {
     numberLogLastTerm :: Term,
-    numberLogLastCommittedIndex :: Index,
-    numberLogLastAppendedIndex :: Index,
+    numberLogLastCommitted :: RaftTime,
+    numberLogLastAppended :: RaftTime,
     numberLogEntries :: [RaftLogEntry]
 }
 
-instance LogIO IntLog RaftLogEntry (ServerState Int)
+instance LogIO IntLog RaftTime RaftLogEntry (ServerState Int)
 
 instance RaftLog IntLog Int where
     -- logLastAppendedTime :: l -> RaftTime
-    logLastAppendedTime log = RaftTime (numberLogLastTerm log) (numberLogLastAppendedIndex log)
+    logLastAppendedTime log = numberLogLastAppended log
 
     -- logLastCommittedTime :: l -> RaftTime
-    logLastCommittedTime log = RaftTime (numberLogLastTerm log) (numberLogLastCommittedIndex log)
+    logLastCommittedTime log = numberLogLastCommitted log
 
 newIntLog :: IO IntLog
 newIntLog = do
     return IntLog {
         numberLogLastTerm = -1,
-        numberLogLastCommittedIndex = -1,
-        numberLogLastAppendedIndex = -1,
+        numberLogLastCommitted = RaftTime (-1) (-1),
+        numberLogLastAppended = RaftTime (-1) (-1),
         numberLogEntries = []
     }
 
-instance Log IntLog IO RaftLogEntry (ServerState Int) where
+instance Log IntLog RaftTime IO RaftLogEntry (ServerState Int) where
 
     mkLog = newIntLog
 
-    lastCommitted log = numberLogLastCommittedIndex log
+    lastCommitted log = numberLogLastCommitted log
 
-    lastAppended log = numberLogLastAppendedIndex log
+    lastAppended log = numberLogLastAppended log
 
-    appendEntries log index newEntries = do
+    appendEntries log (RaftTime term index) newEntries = do
         -- TODO cleanup this logic
         return log {
             numberLogLastTerm = maximum $ map entryTerm newEntries,
-            numberLogLastAppendedIndex = index + (length newEntries) - 1,
+            numberLogLastAppended = RaftTime term (index + (length newEntries) - 1),
             numberLogEntries = (take (index + 1) (numberLogEntries log)) ++ newEntries
         }
-    fetchEntries log index count = do
+    fetchEntries log (RaftTime _ index) count = do
         let entries = numberLogEntries log
         return $ take count $ drop index entries
 
-    commitEntries log index initialState = do
-        let committed = numberLogLastCommittedIndex log
+    commitEntries log (RaftTime term index) initialState = do
+        let RaftTime _ committed = numberLogLastCommitted log
         if index > committed
             then do
                 let nextCommitted = committed + 1
@@ -130,7 +130,7 @@ instance Log IntLog IO RaftLogEntry (ServerState Int) where
                 return $ take count $ drop start existing
             commit  nextCommitted [] oldState = do
                 return (log {
-                        numberLogLastCommittedIndex = nextCommitted -1
+                        numberLogLastCommitted = RaftTime term (nextCommitted - 1)
                     },oldState)
             commit nextCommitted (entry:rest) oldState = do
                 let state = applyAction oldState $ entryAction entry

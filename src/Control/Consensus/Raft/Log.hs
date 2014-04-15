@@ -57,12 +57,15 @@ import GHC.Generics
 -}
 data RaftTime = RaftTime Term Index deriving (Show,Eq,Ord,Generic)
 
+instance LogTime RaftTime where
+    logIndex (RaftTime _ index) = index
+
 instance Serialize RaftTime
 
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (LogIO l RaftLogEntry (ServerState v)) => RaftLog l v where
+class (LogIO l RaftTime RaftLogEntry (ServerState v)) => RaftLog l v where
     logLastAppendedTime :: l -> RaftTime
     logLastCommittedTime :: l -> RaftTime
 
@@ -78,7 +81,7 @@ newRaft server = newTVar $ RaftState {
 {-|
 A minimal 'Server' capable of participating in the Raft algorithm.
 -}
-type RaftServer l v = Server l RaftLogEntry (ServerState v)
+type RaftServer l v = Server l RaftTime RaftLogEntry (ServerState v)
 
 {-|
 Encapsulates the state necessary for the Raft algorithm, depending
@@ -140,7 +143,7 @@ data RaftLogEntry =  RaftLogEntry {
 
 instance Serialize RaftLogEntry
 
-data Server l e v = (LogIO l e v) => Server {
+data Server l t e v = (LogIO l t e v) => Server {
     serverId :: ServerId,
     serverLog :: l,
     serverState :: v

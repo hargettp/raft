@@ -70,7 +70,7 @@ data AppendEntries =  AppendEntries {
     aeLeader :: ServerId,
     aeLeaderTerm :: Term,
     aePreviousTime :: RaftTime,
-    aeCommittedIndex :: Index,
+    aeCommittedTime :: RaftTime,
     aeEntries :: [RaftLogEntry]
 } deriving (Eq,Show,Generic)
 
@@ -88,8 +88,8 @@ data MemberResult = MemberResult {
     memberActionSuccess :: Bool,
     memberLeader :: Maybe ServerId,
     memberCurrentTerm :: Term,
-    memberLastAppended :: Index,
-    memberLastCommitted :: Index
+    memberLastAppended :: RaftTime,
+    memberLastCommitted :: RaftTime
 } deriving (Eq,Show,Generic)
 
 instance Serialize MemberResult
@@ -111,13 +111,13 @@ goAppendEntries :: CallSite
             -> Name                     -- ^^ Member that is target of the call
             -> Term                     -- ^^ Leader's current term
             -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
-            -> Index                    -- ^^ Last index up to which all entries are committed on leader
+            -> RaftTime                    -- ^^ Last index up to which all entries are committed on leader
             -> [RaftLogEntry]    -- ^^ Entries to append
             -> IO (Maybe MemberResult)
-goAppendEntries cs cfg member term prevTime commitIndex entries = do
+goAppendEntries cs cfg member term prevTime commitTime entries = do
     let Just leader = clusterLeader cfg
     response <- callWithTimeout cs member methodAppendEntries (timeoutRpc $ configurationTimeouts cfg)
-        $ encode $ AppendEntries leader term prevTime commitIndex entries
+        $ encode $ AppendEntries leader term prevTime commitTime entries
     case response of
         Just bytes -> let Right results = decode bytes
                       in return $ Just results
@@ -164,7 +164,7 @@ goPerformAction cs cfg member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> Configuration -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Maybe Index)
+onAppendEntries :: Endpoint -> Configuration -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Maybe RaftTime)
 onAppendEntries endpoint cfg server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ configurationTimeouts cfg)
     case msg of
@@ -172,7 +172,7 @@ onAppendEntries endpoint cfg server fn = do
             let Right req = decode bytes
             result <- fn req
             reply $ encode result
-            return $ Just $ aeCommittedIndex req
+            return $ Just $ aeCommittedTime req
         Nothing -> return Nothing
 
 {-|

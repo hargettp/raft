@@ -124,7 +124,8 @@ testClient = do
             (withClient transport "client1" cfg $ \client -> do
                                 pause
                                 performAction client $ Cmd $ encode $ Add 1)
-        assertBool "Client index should be -1" $ clientResult == -1
+        let RaftTime _ clientIndex = clientResult
+        assertBool "Client index should be -1" $ clientIndex == -1
 
 testPerformAction :: Assertion
 testPerformAction = do
@@ -139,8 +140,8 @@ testPerformAction = do
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 0,
-                memberLastAppended = 0,
-                memberLastCommitted = 0
+                memberLastAppended = RaftTime 0 0,
+                memberLastCommitted = RaftTime 0 0
                 }
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
@@ -165,8 +166,8 @@ testGoPerformAction = do
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 0,
-                memberLastAppended = 0,
-                memberLastCommitted = 0
+                memberLastAppended = RaftTime 0 0,
+                memberLastCommitted = RaftTime 0 0
                 }
     -- we have to wait a bit for server to start
     pause
@@ -194,15 +195,15 @@ testClientPerformAction = do
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 1,
-                memberLastAppended = 1,
-                memberLastCommitted = 1
+                memberLastAppended = RaftTime 1 1,
+                memberLastCommitted = RaftTime 1 1
                 }
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let raftClient = newClient endpoint client cfg
     let action = Cmd $ encode $ Add 1
     result <- performAction raftClient action
-    assertBool "Result should be true" $ result == 1
+    assertBool "Result should be true" $ result == RaftTime 1 1
 
 testWithClientPerformAction :: Assertion
 testWithClientPerformAction = do
@@ -218,8 +219,8 @@ testWithClientPerformAction = do
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 1,
-                memberLastAppended = 1,
-                memberLastCommitted = 1
+                memberLastAppended = RaftTime 1 1,
+                memberLastCommitted = RaftTime 1 1
                 }
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
@@ -227,7 +228,7 @@ testWithClientPerformAction = do
     result <- withClient transport client cfg $ \raftClient -> do
         pause
         performAction raftClient action
-    assertBool "Result should be true" $ result == 1
+    assertBool "Result should be true" $ result == RaftTime 1 1
 
 --------------------------------------------------------------------------------
 -- helpers

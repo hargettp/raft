@@ -60,13 +60,13 @@ may be unexpected.  While the underyling log implementation may itself be pure, 
 methods are wrapped in a monad to support those implementations that may not be--such
 as a log whose entries are read from disk.
 -}
-class Log l m e s | l -> e,l -> s, l -> m where
+class Log l t m e s | l -> t,l -> e,l -> s,l -> m where
     mkLog :: m l
-    lastCommitted :: l -> Index
-    lastAppended :: l -> Index
-    appendEntries :: l -> Index -> [e] -> m l
-    fetchEntries :: l -> Index -> Int -> m [e]
-    commitEntries :: l -> Index -> s -> m (l,s)
+    lastCommitted :: l -> t
+    lastAppended :: l -> t
+    appendEntries :: l -> t -> [e] -> m l
+    fetchEntries :: l -> t -> Int -> m [e]
+    commitEntries :: l -> t -> s -> m (l,s)
 
 class (Ord t,Eq t) => LogTime t where
     logIndex :: t -> Index
@@ -74,4 +74,4 @@ class (Ord t,Eq t) => LogTime t where
 {-|
 Variant of 'Log' useful for implementations that need to perform 'IO'.
 -}
-class (Log l IO e s) => LogIO l e s
+class (Log l t IO e s) => LogIO l t e s

@@ -205,8 +205,7 @@ doVolunteer vRaft endpoint candidate = do
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
         log = serverLog $ raftServer raft
-        lastIndex = lastAppended log
-        RaftTime lastTerm _ = logLastAppendedTime log
+        RaftTime lastTerm lastIndex = logLastAppendedTime log
     debugM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
     votes <- goRequestVote cs cfg term candidate (RaftTime lastTerm lastIndex)
     debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)
@@ -253,17 +252,17 @@ lead vRaft endpoint name = do
                 cfg = serverConfiguration $ serverState server
                 leader = serverId server
                 log = serverLog server
-                appended = lastAppended log
+                RaftTime _ appended = lastAppended log
                 cs = newCallSite endpoint leader
                 prevLogIndex = index - 1
-            previousEntries <- fetchEntries log prevLogIndex 1
-            entries <- fetchEntries log index $ appended - index + 1
+            previousEntries <- fetchEntries log (RaftTime (raftCurrentTerm raft) prevLogIndex) 1
+            entries <- fetchEntries log (RaftTime (raftCurrentTerm raft) index) $ appended - index + 1
             infoM _log $ "Server " ++ leader ++ " notifying member " ++ member ++ " in term " ++ (show term)
             start <- getCPUTime
             response <- case previousEntries of
-                [] -> goAppendEntries cs cfg member term (RaftTime (-1) prevLogIndex)  index entries
+                [] -> goAppendEntries cs cfg member term (RaftTime (-1) prevLogIndex)  (RaftTime (raftCurrentTerm raft) index) entries
                 _ -> let prevTerm = entryTerm $ last previousEntries
-                                     in goAppendEntries cs cfg member term (RaftTime prevTerm prevLogIndex) index entries
+                                     in goAppendEntries cs cfg member term (RaftTime prevTerm prevLogIndex) (RaftTime (raftCurrentTerm raft) index) entries
             stop <- getCPUTime
             let diff =  quot (stop - start) 1000000 -- 1 million picoseconds in a microsecond
             if diff > (toInteger $ timeoutRpc $ configurationTimeouts cfg)
@@ -292,7 +291,7 @@ doPulse vRaft name followers = do
     let cfg = serverConfiguration $ serverState $ raftServer raft
     if Just name == (clusterLeader cfg)
         then do
-            let index = lastCommitted $ serverLog $ raftServer raft
+            let RaftTime _ index = lastCommitted $ serverLog $ raftServer raft
             mapM_ (pulse index) followers
             threadDelay $ timeoutPulse $ configurationTimeouts $ cfg
             doPulse vRaft name followers
@@ -310,8 +309,8 @@ doServe vRaft endpoint leader followers = do
         raft <- atomically $ readTVar vRaft
         let rlog = serverLog $ raftServer raft
             term = raftCurrentTerm raft
-            nextIndex = (lastAppended rlog) + 1
-        rlog1 <- appendEntries rlog nextIndex [RaftLogEntry term action]
+            nextIndex = (let RaftTime _ i = lastAppended rlog in i) + 1
+        rlog1 <- appendEntries rlog (RaftTime term nextIndex) [RaftLogEntry term action]
         atomically $ modifyTVar vRaft $ \oldRaft -> setRaftLog rlog1 oldRaft
         return $ createResult True raft
     doServe vRaft endpoint leader followers
