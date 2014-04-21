@@ -24,6 +24,7 @@ library
                        Control.Consensus.Raft.Client,
                        Control.Consensus.Raft.Configuration,
                        Control.Consensus.Raft.Log,
+                       Control.Consensus.Raft.Members,
                        Control.Consensus.Raft.Protocol,
                        Control.Consensus.Raft.Types
 
