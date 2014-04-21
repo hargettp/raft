@@ -22,8 +22,9 @@ module TestRaft (
 import Control.Consensus.Raft
 import Control.Consensus.Raft.Client
 import Control.Consensus.Raft.Configuration
-import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Log
+import Control.Consensus.Raft.Members
+import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Types
 
 import IntServer
@@ -80,6 +81,8 @@ test3Cluster = do
     let cfg = newTestConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
         pause >> pause
+        leaders <- allLeaders vRafts
+        infoM _log $ "Leaders are " ++ (show leaders)
         _ <- checkForLeader (1 :: Integer) Nothing vRafts
         return ()
 
@@ -135,8 +138,8 @@ testPerformAction = do
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ -> do
-            return MemberResult {
+        onPerformAction endpoint server $ \_ reply -> do
+            reply MemberResult {
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 0,
@@ -160,9 +163,9 @@ testGoPerformAction = do
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ -> do
+        onPerformAction endpoint server $ \_ reply -> do
             infoM _log $ "Returning result"
-            return MemberResult {
+            reply MemberResult {
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 0,
@@ -190,8 +193,8 @@ testClientPerformAction = do
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ -> do
-            return MemberResult {
+        onPerformAction endpoint server $ \_ reply -> do
+            reply MemberResult {
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 1,
@@ -214,8 +217,8 @@ testWithClientPerformAction = do
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ -> do
-            return MemberResult {
+        onPerformAction endpoint server $ \_ reply -> do
+            reply MemberResult {
                 memberActionSuccess = True,
                 memberLeader = Nothing,
                 memberCurrentTerm = 1,
@@ -241,7 +244,7 @@ checkForLeader run possibleLeader vRafts = do
         return $ raftServer raft) vRafts
     let leaders = map (clusterLeader . serverConfiguration . serverState) servers
         results = map (serverData . serverState)  servers
-    -- all results should be equal--and since we didn't perform any commands, should still be 0    
+    -- all results should be equal--and since we didn't perform any commands, should still be 0
     assertBool ((show run) ++ ": All results should be equal") $ all (== 0) results
     assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
     assertBool ((show run) ++ ": There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
@@ -253,6 +256,14 @@ checkForLeader run possibleLeader vRafts = do
         Nothing -> if all (== leader) leaders
                         then return leader
                         else return Nothing
+
+allLeaders :: [TVar (RaftState IntLog Int)] -> IO [Maybe ServerId]
+allLeaders vRafts = do
+    servers <- mapM (\vRaft -> do
+        raft <- atomically $ readTVar vRaft
+        return $ raftServer raft) vRafts
+    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+    return leaders
 
 withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
 withClient transport name cfg fn = do
@@ -268,7 +279,7 @@ pause :: IO ()
 pause = threadDelay serverTimeout
 
 testTimeouts :: Timeouts
-testTimeouts = timeouts (50 * 1000)
+testTimeouts = timeouts (25 * 1000)
 
 -- We need this to be high enough that members
 -- can complete their election processing (that's the longest timeout we have)

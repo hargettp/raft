@@ -59,6 +59,7 @@ data RaftTime = RaftTime Term Index deriving (Show,Eq,Ord,Generic)
 
 instance LogTime RaftTime where
     logIndex (RaftTime _ index) = index
+    nextLogTime (RaftTime term index) = RaftTime term (index + 1)
 
 instance Serialize RaftTime
 

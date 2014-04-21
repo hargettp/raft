@@ -9,10 +9,14 @@ import qualified TestRaft as R
 -- external imports
 
 import Control.Concurrent
+
 import System.Directory
 import System.Info
-import System.Log.Logger
+import System.IO
+import System.Log.Formatter
+import System.Log.Handler (setFormatter)
 import System.Log.Handler.Simple
+import System.Log.Logger
 
 import Test.Framework
 
@@ -32,9 +36,10 @@ initLogging = do
   if exists
     then removeFile logFile
     else return ()
-  s <- fileHandler logFile INFO
+  s <- streamHandler stdout INFO
+  let fs = setFormatter s $ simpleLogFormatter "$time - $msg"
   updateGlobalLogger rootLoggerName (setLevel WARNING)
-  updateGlobalLogger rootLoggerName (addHandler s)
+  updateGlobalLogger rootLoggerName $ setHandlers [fs]
 
 printPlatform :: IO ()
 printPlatform = do

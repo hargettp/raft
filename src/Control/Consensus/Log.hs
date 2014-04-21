@@ -20,6 +20,7 @@ module Control.Consensus.Log (
 
     Index,
     Log(..),
+    fetchLatestEntries,
     LogIO,
     LogTime(..)
 
@@ -68,8 +69,17 @@ class Log l t m e s | l -> t,l -> e,l -> s,l -> m where
     fetchEntries :: l -> t -> Int -> m [e]
     commitEntries :: l -> t -> s -> m (l,s)
 
+fetchLatestEntries :: (LogTime t, Monad m, Log l t m e s) => l -> m (t,[e])
+fetchLatestEntries log = do
+    let commitTime = lastCommitted log
+        startTime = nextLogTime commitTime
+        count = (logIndex $ lastAppended log) - (logIndex $ lastCommitted log)
+    entries <- fetchEntries log startTime count
+    return (commitTime,entries)
+
 class (Ord t) => LogTime t where
     logIndex :: t -> Index
+    nextLogTime :: t -> t
 
 {-|
 Variant of 'Log' useful for implementations that need to perform 'IO'.

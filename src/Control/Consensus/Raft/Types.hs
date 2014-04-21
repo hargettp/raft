@@ -61,6 +61,7 @@ and thus require different timeout values to operate correctly.
 -}
 data Timeouts = Timeouts {
     timeoutRpc :: Timeout,
+    timeoutClientRpc :: Timeout,
     timeoutHeartbeat :: Timeout,
     timeoutPulse :: Timeout,
     timeoutElectionRange :: (Timeout,Timeout)
@@ -72,7 +73,7 @@ instance Serialize Timeouts
 Returns default timeouts generally expected to be useful
 in real-world environments, largely based on original Raft paper.
 -}
-defaultTimeouts :: Timeouts 
+defaultTimeouts :: Timeouts
 defaultTimeouts = timeouts $ 150 * 1000
 
 {-|
@@ -81,11 +82,12 @@ Returns timeouts scaled from the provided RPC timeout.
 -}
 timeouts :: Timeout -> Timeouts
 timeouts rpc = 
-    let heartbeat = 4 * rpc
+    let heartbeat = 10 * rpc
         in Timeouts {
             timeoutRpc = rpc,
+            timeoutClientRpc = 5 * rpc,
             timeoutHeartbeat = heartbeat,
-            timeoutPulse = 3 * rpc,
+            timeoutPulse = 7 * rpc, -- must be less than the heartbeat
             timeoutElectionRange = (5 * heartbeat,10 * heartbeat)
 }
 

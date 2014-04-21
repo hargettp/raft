@@ -118,10 +118,11 @@ instance Log IntLog RaftTime IO RaftLogEntry (ServerState Int) where
 
     commitEntries log (RaftTime term index) initialState = do
         let RaftTime _ committed = numberLogLastCommitted log
-        if index > committed
+            count = index - committed
+        if count > 0
             then do
                 let nextCommitted = committed + 1
-                uncommitted <- fetchEntries log (RaftTime term nextCommitted) (index - committed)
+                uncommitted <- fetchEntries log (RaftTime term nextCommitted) count
                 commit nextCommitted uncommitted initialState
             else return (log,initialState)
         where

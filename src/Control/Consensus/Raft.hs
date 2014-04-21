@@ -25,6 +25,7 @@ module Control.Consensus.Raft (
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Log
+import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
 
 import Control.Consensus.Log
@@ -43,7 +44,6 @@ import Network.RPC
 
 import Prelude hiding (log)
 
-import System.CPUTime
 import System.Log.Logger
 
 --------------------------------------------------------------------------------
@@ -82,6 +82,7 @@ withConsensus endpoint server fn = do
 follow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 follow vRaft endpoint name = do
     term <- atomically $ do
+        modifyTVar vRaft $ \oldRaft -> setRaftLeader Nothing oldRaft
         raft <- readTVar vRaft
         return $ raftCurrentTerm raft
     infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
@@ -103,11 +104,10 @@ doFollow vRaft endpoint member leading = do
     maybeCommitted <- onAppendEntries endpoint cfg member $ \req -> do
         debugM _log $ "Server " ++ member ++ " received " ++ (show req)
         infoM _log $ "Server " ++ member ++ " received pulse from " ++ (aeLeader req)
-        -- grab these entries, because we can't do so inside the transaction
-        atomically $ do
+        (success, raft) <- atomically $ do
             raft <-readTVar vRaft
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
-                then return $ createResult False raft
+                then return (False,raft)
                 else do
                     -- first update term and leader
                     if (aeLeaderTerm req) > (raftCurrentTerm raft)
@@ -122,7 +122,16 @@ doFollow vRaft endpoint member leading = do
                                         $ setRaftLastCandidate Nothing oldRaft
                                 else return ()
                     -- we assume terms are equal if we're here
-                    return $ createResult True raft
+                    return (True,raft)
+        if success
+            then do
+                let log = serverLog $ raftServer raft
+                newLog <- appendEntries log (aePreviousTime req) (aeEntries req)
+                updatedRaft <- atomically $ do 
+                        modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
+                        readTVar vRaft
+                return $ mkResult success updatedRaft
+            else return $ mkResult success raft
     case maybeCommitted of
         Just committed ->  do
             -- what is good here is that since there is only 1 doFollow
@@ -177,7 +186,7 @@ doVote vRaft endpoint name leading = do
                                         else return (raft,False,"Candidate log out of date")
         infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is "
             ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
-        return $ createResult vote raft
+        return $ mkResult vote raft
     if leading && won
         then return ()
         else doVote vRaft endpoint name leading
@@ -228,92 +237,110 @@ lead vRaft endpoint name = do
                 $ setRaftLastCandidate Nothing oldRaft
         readTVar vRaft
     let cfg = serverConfiguration $ serverState $ raftServer raft
-        members = clusterMembersOnly cfg
+        members = mkMembers cfg
         leader = name
         term = raftCurrentTerm raft
-    infoM _log $ "Server " ++ name ++ " leading in new term " ++ (show term)
-    followers <- mapM (makeFollower term) members
-    raceAll_ $ [doPulse vRaft leader followers,
-                     doVote vRaft endpoint leader True,
-                     doFollow vRaft endpoint name True,
-                     doServe vRaft endpoint leader followers]
-                ++ map followerNotifier followers
-    where
-        makeFollower term member = do
-            lastIndex <- atomically $ newEmptyTMVar
-            return Follower {
-                followerLastIndex = lastIndex,
-                followerNotifier = notify term lastIndex member
-            }
-        notify term lastIndex member= do
-            index <- atomically $ takeTMVar lastIndex
-            raft <- atomically $ readTVar vRaft
-            let server = raftServer raft
-                cfg = serverConfiguration $ serverState server
-                leader = serverId server
-                log = serverLog server
-                RaftTime _ appended = lastAppended log
-                cs = newCallSite endpoint leader
-                prevLogIndex = index - 1
-            previousEntries <- fetchEntries log (RaftTime (raftCurrentTerm raft) prevLogIndex) 1
-            entries <- fetchEntries log (RaftTime (raftCurrentTerm raft) index) $ appended - index + 1
-            infoM _log $ "Server " ++ leader ++ " notifying member " ++ member ++ " in term " ++ (show term)
-            start <- getCPUTime
-            response <- case previousEntries of
-                [] -> goAppendEntries cs cfg member term (RaftTime (-1) prevLogIndex)  (RaftTime (raftCurrentTerm raft) index) entries
-                _ -> let prevTerm = entryTerm $ last previousEntries
-                                     in goAppendEntries cs cfg member term (RaftTime prevTerm prevLogIndex) (RaftTime (raftCurrentTerm raft) index) entries
-            stop <- getCPUTime
-            let diff =  quot (stop - start) 1000000 -- 1 million picoseconds in a microsecond
-            if diff > (toInteger $ timeoutRpc $ configurationTimeouts cfg)
-                then warningM _log $ "Elapsed time longer than rpcTimeout from " ++ leader ++ " to " ++ member ++ ": " ++ (show diff)
-                else return ()
-            case response of
-                Nothing -> notify term lastIndex member
-                Just result -> if (memberCurrentTerm result) > term
-                        then do
-                            -- we have seen a member with a higher term, so we have to change terms
-                            -- and step down; but make sure we update ourselves to the highest known term
-                            atomically $ modifyTVar vRaft $ \oldRaft ->
-                                setRaftTerm (foldl max term [(memberCurrentTerm result),(raftCurrentTerm oldRaft)]) 
-                                    $ setRaftLastCandidate Nothing oldRaft
-                            debugM _log $ "Leader " ++ name ++ " has lower term than member " ++ member
-                            return ()
-                        else if (memberActionSuccess result)
-                            -- TODO figure these calls out
-                            then notify term lastIndex member
-                            else notify term lastIndex member
-            return ()
+    clients <- atomically $ newMailbox
+    vLatest <- atomically $ newEmptyTMVar
+    infoM _log $ "Server " ++ name ++ " leading in term " ++ (show term)
+    raceAll_ $ [doPulse vRaft vLatest,
+                doVote vRaft endpoint leader True,
+                doFollow vRaft endpoint leader True,
+                doServe vRaft endpoint leader clients vLatest,
+                doCommit vRaft endpoint leader members clients vLatest]
 
-doPulse :: (RaftLog l v) => TVar (RaftState l v) -> ServerId -> [Follower] -> IO ()
-doPulse vRaft name followers = do
-    raft <- atomically $ readTVar vRaft
-    let cfg = serverConfiguration $ serverState $ raftServer raft
-    if Just name == (clusterLeader cfg)
-        then do
-            let RaftTime _ index = lastCommitted $ serverLog $ raftServer raft
-            mapM_ (pulse index) followers
-            threadDelay $ timeoutPulse $ configurationTimeouts $ cfg
-            doPulse vRaft name followers
-        else return ()
-    where
-        pulse index follower = atomically $ do
-            _ <- tryPutTMVar (followerLastIndex follower) index
-            return ()
+doPulse :: (RaftLog l v) => TVar (RaftState l v) -> TMVar Index -> IO ()
+doPulse vRaft vLatest = do
+    cfg <- atomically $ do
+        raft <- readTVar vRaft
+        let index = logIndex $ lastAppended $ serverLog $ raftServer raft
+        empty <- isEmptyTMVar vLatest
+        if empty
+            then putTMVar vLatest index
+            else return ()
+        return $ serverConfiguration $ serverState $ raftServer raft
+    threadDelay $ timeoutPulse $ configurationTimeouts cfg
+    doPulse vRaft vLatest
 
-doServe :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> [Follower] -> IO ()
-doServe vRaft endpoint leader followers = do
-    infoM _log $ "Serving from " ++ leader
-    onPerformAction endpoint leader $ \action -> do
+doServe :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> Mailbox (Index,Reply MemberResult) -> TMVar Index -> IO ()
+doServe vRaft endpoint leader clients vLatest = do
+    (atomically $ readTVar vRaft) >>= \raft -> infoM _log $ "Serving from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
+    onPerformAction endpoint leader $ \action reply -> do
         infoM _log $ "Leader " ++ leader ++ " received action " ++ (show action)
         raft <- atomically $ readTVar vRaft
         let rlog = serverLog $ raftServer raft
             term = raftCurrentTerm raft
             nextIndex = (let RaftTime _ i = lastAppended rlog in i) + 1
-        rlog1 <- appendEntries rlog (RaftTime term nextIndex) [RaftLogEntry term action]
-        atomically $ modifyTVar vRaft $ \oldRaft -> setRaftLog rlog1 oldRaft
-        return $ createResult True raft
-    doServe vRaft endpoint leader followers
+        -- TODO this should be changed to append the entries, capture the last appended index,
+        -- and put the client on the pending mailbox, broadcast entries to all members.
+        -- the leader's commit task will commit once enough members have appended.
+        newLog <- appendEntries rlog (RaftTime term nextIndex) [RaftLogEntry term action]
+        atomically $ do
+            modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
+            writeMailbox clients (logIndex $ logLastAppendedTime newLog,reply)
+        infoM _log $ "Appended action at index " ++ (show $ logIndex $ logLastAppendedTime newLog)
+    doServe vRaft endpoint leader clients vLatest
+
+{-|
+Leaders commit entries to their log, once enough members have appended those entries.
+Once committed, the leader replies to the client who requested the action.
+-}
+doCommit :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> M.Map ServerId Member -> Mailbox (Index,Reply MemberResult) -> TMVar Index -> IO ()
+doCommit vRaft endpoint leader members pending vLatest = do
+    raft <- atomically $ do
+        -- interestingly, we don't care about its value at the moment
+        _ <- takeTMVar vLatest
+        readTVar vRaft
+    let rlog = serverLog $ raftServer raft
+        cs = newCallSite endpoint leader
+        term = raftCurrentTerm raft
+        prevTime = logLastCommittedTime rlog
+        cfg = serverConfiguration $ serverState $ raftServer raft
+    (commitTime,entries) <- fetchLatestEntries rlog
+    infoM _log $ "Synchronizing from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft) ++ ": " ++ (show entries)
+    results <- goSynchronizeEntries cs cfg term prevTime commitTime entries
+    infoM _log $ "Synchronized from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
+    let newMembers = updateMembers members results
+        newAppendedIndex = membersSafeAppendedIndex newMembers
+        newTerm = membersHighestTerm newMembers
+    infoM _log $ "Safe appended index is " ++ (show newAppendedIndex) ++ ": " ++ (show $ membersAppendedIndex members)
+    if newTerm > (raftCurrentTerm raft)
+        then do
+            infoM _log $ "Leading stepping down; new term " ++ (show newTerm) ++ " discovered"
+            atomically $ modifyTVar vRaft $ \oldRaft ->
+                setRaftTerm newTerm oldRaft
+            return ()
+        else do
+            (newLog,newState) <- let time = (RaftTime (raftCurrentTerm raft) newAppendedIndex)
+                                     oldCommitedIndex = logIndex $ commitTime
+                                     count = newAppendedIndex - oldCommitedIndex
+                                     in if count > 0
+                                        then do
+                                            infoM _log $ "Committing at time " ++ (show time)
+                                            commitEntries rlog time (serverState $ raftServer $ raft)
+                                        else return (rlog,(serverState $ raftServer $ raft))
+            maybeReply <- atomically $ do
+                modifyTVar vRaft $ \oldRaft ->
+                    setRaftLog newLog $ setRaftServerState newState oldRaft
+                maybeClient <- tryPeekMailbox pending
+                case maybeClient of
+                    Nothing -> return Nothing
+                    Just (index,reply) ->
+                        if index <= (logIndex $ logLastCommittedTime newLog)
+                            then do
+                                updatedRaft <- readTVar vRaft
+                                _ <- readMailbox pending
+                                return $ Just (index, reply $ mkResult True updatedRaft)
+                            else return Nothing
+            case maybeReply of
+                Nothing -> do
+                    infoM _log $ "No client at index " ++ (show $ logIndex $ logLastCommittedTime newLog)
+                    return ()
+                Just (index,reply) -> do
+                    infoM _log $ "Replying at index " ++ (show index)
+                    reply
+                    infoM _log $ "Replied at index " ++ (show index)
+            doCommit vRaft endpoint leader newMembers pending vLatest
 
 doRedirect :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> ServerId -> IO ()
 doRedirect vRaft endpoint member = do
@@ -321,16 +348,11 @@ doRedirect vRaft endpoint member = do
         raft <- readTVar vRaft
         return $ raftCurrentTerm raft
     infoM _log $ "Redirecting from " ++ member ++ " in " ++ (show term)
-    onPerformAction endpoint member $ \action -> do
+    onPerformAction endpoint member $ \action reply -> do
         infoM _log $ "Member " ++ member ++ " received action " ++ (show action)
         raft <- atomically $ readTVar vRaft
-        return $ createResult False raft
+        reply $ mkResult False raft
     doRedirect vRaft endpoint member
-
-data Follower = Follower {
-    followerLastIndex :: TMVar Index,
-    followerNotifier :: IO ()
-}
 
 raceAll_ :: [IO ()] -> IO ()
 raceAll_ actions = do

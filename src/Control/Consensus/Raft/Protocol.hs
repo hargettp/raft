@@ -24,14 +24,12 @@ module Control.Consensus.Raft.Protocol (
 
     RequestVote(..),
 
-    MemberResult(..),
-    createResult,
-
     -- * Client call
     goPerformAction,
 
     -- * Leader calls
     goAppendEntries,
+    goSynchronizeEntries,
     goRequestVote,
     onPerformAction,
 
@@ -43,9 +41,10 @@ module Control.Consensus.Raft.Protocol (
 
 -- local imports
 
-import Control.Consensus.Log
+import Control.Consensus.Log ()
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Log
+import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
 
 -- external imports
@@ -84,25 +83,6 @@ data RequestVote = RequestVote {
 
 instance Serialize RequestVote
 
-data MemberResult = MemberResult {
-    memberActionSuccess :: Bool,
-    memberLeader :: Maybe ServerId,
-    memberCurrentTerm :: Term,
-    memberLastAppended :: RaftTime,
-    memberLastCommitted :: RaftTime
-} deriving (Eq,Show,Generic)
-
-instance Serialize MemberResult
-
-createResult :: (RaftLog l v) => Bool -> RaftState l v -> MemberResult
-createResult success raft = MemberResult {
-    memberActionSuccess = success,
-    memberLeader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft,
-    memberCurrentTerm = raftCurrentTerm raft,
-    memberLastAppended = lastAppended $ serverLog $ raftServer raft,
-    memberLastCommitted = lastCommitted $ serverLog $ raftServer raft
-}
-
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
@@ -122,6 +102,26 @@ goAppendEntries cs cfg member term prevTime commitTime entries = do
         Just bytes -> let Right results = decode bytes
                       in return $ Just results
         _ -> return Nothing
+
+goSynchronizeEntries :: CallSite
+            -> Configuration            -- ^^ Cluster configuration
+            -> Term                     -- ^^ Leader's current term
+            -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
+            -> RaftTime                 -- ^^ Last index up to which all entries are committed on leader
+            -> [RaftLogEntry]    -- ^^ Entries to append
+            -> IO (M.Map Name (Maybe MemberResult))
+goSynchronizeEntries cs cfg term prevTime commitTime entries = do
+    let Just leader = clusterLeader cfg
+        members = clusterMembersOnly cfg
+        timeout = (timeoutRpc $ configurationTimeouts cfg)
+    results <- gcallWithTimeout cs members methodAppendEntries timeout
+        $ encode $ AppendEntries leader term prevTime commitTime entries
+    return $ mapResults results
+    where
+        mapResults results = M.map (\msg ->
+            case msg of
+                Just bytes -> let Right result = decode bytes in Just result
+                _ -> Nothing) results
 
 methodRequestVote :: String
 methodRequestVote = "requestVote"
@@ -153,7 +153,7 @@ goPerformAction :: CallSite
                     -> Action
                     -> IO (Maybe MemberResult)
 goPerformAction cs cfg member action = do
-    maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutRpc $ configurationTimeouts cfg) $ encode action
+    maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ configurationTimeouts cfg) $ encode action
     case maybeMsg of
         Just msg -> case decode msg of
                         Right result -> return $ Just result
@@ -189,11 +189,10 @@ onRequestVote endpoint server fn = do
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: Endpoint -> ServerId -> (Action -> IO MemberResult) -> IO ()
+onPerformAction :: Endpoint -> ServerId -> (Action -> Reply MemberResult -> IO ()) -> IO ()
 onPerformAction endpoint member fn = do
     (bytes,reply) <- hear endpoint member methodPerformAction
     infoM _log $ "Heard performAction on " ++ member
     let Right action = decode bytes
-    response <- fn action
-    reply $ encode response
+    fn action (\response -> reply $ encode response)
     return ()
