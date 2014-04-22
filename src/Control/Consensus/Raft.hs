@@ -58,7 +58,7 @@ takes care of coordinating the transitions among followers, candidates, and lead
 -}
 withConsensus :: (RaftLog l v) => Endpoint -> RaftServer l v -> (Raft l v -> IO ()) -> IO ()
 withConsensus endpoint server fn = do
-    vRaft <- atomically $ newRaft server
+    vRaft <- atomically $ mkRaft server
     withAsync (run vRaft)
         (\_ -> fn vRaft)
     where

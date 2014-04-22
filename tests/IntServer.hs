@@ -123,7 +123,7 @@ instance Log IntLog RaftTime IO RaftLogEntry (ServerState Int) where
                 commit nextCommitted uncommitted initialState
             else return (log,initialState)
         where
-            commit  nextCommitted [] oldState = do
+            commit nextCommitted [] oldState = do
                 return (log {
                         numberLogLastCommitted = RaftTime term (nextCommitted - 1)
                     },oldState)

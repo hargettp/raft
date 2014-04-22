@@ -20,7 +20,7 @@
 module Control.Consensus.Raft.Log (
     -- * Raft state
     Raft,
-    newRaft,
+    mkRaft,
     RaftState(..),
     RaftServer,
     RaftLog,
@@ -71,15 +71,17 @@ class (LogIO l RaftTime RaftLogEntry (ServerState v)) => RaftLog l v
 
 type Raft l v = TVar (RaftState l v)
 
-newRaft :: (RaftLog l v) => RaftServer l v -> STM (Raft l v)
-newRaft server = newTVar $ RaftState {
+mkRaft :: (RaftLog l v) => RaftServer l v -> STM (Raft l v)
+mkRaft server = newTVar $ RaftState {
         raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
         raftServer = server
         {-
-        serverId :: Name,
-        serverLog :: l,
-        serverState :: v
+        serverName :: Name, -- raftName
+        serverLog :: l, -- raftLog
+        serverState :: v, -- raftData
+
+        serverConfiguration :: Configuration
         -}
     }
 
