@@ -141,7 +141,7 @@ mkIntServer :: Configuration -> Name -> Int -> IO IntServer
 mkIntServer cfg sid initial = do
     log <- newIntLog
     return Server {
-        serverId = sid,
+        serverName = sid,
         serverLog = log,
         serverState = ServerState {
             serverConfiguration = cfg,

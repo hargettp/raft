@@ -63,19 +63,19 @@ withConsensus endpoint server fn = do
         (\_ -> fn vRaft)
     where
         run vRaft = do
-            infoM _log $ "Starting server " ++ (serverId server)
+            infoM _log $ "Starting server " ++ (serverName server)
             finally (catch (participate vRaft)
                         (\e -> case e of
                                 ThreadKilled -> return ()
-                                _ -> debugM _log $ (show $ serverId server) ++ " encountered error: " ++ (show (e :: AsyncException))))
+                                _ -> debugM _log $ (show $ serverName server) ++ " encountered error: " ++ (show (e :: AsyncException))))
                 (do
-                    infoM _log $ "Stopped server " ++ (serverId server) )
+                    infoM _log $ "Stopped server " ++ (serverName server) )
         participate vRaft = do
-            follow vRaft endpoint $ serverId server
-            won <- volunteer vRaft endpoint $ serverId server
+            follow vRaft endpoint $ serverName server
+            won <- volunteer vRaft endpoint $ serverName server
             if won
                 then do
-                    lead vRaft endpoint $ serverId server
+                    lead vRaft endpoint $ serverName server
                 else return ()
             participate vRaft
 

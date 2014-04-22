@@ -120,7 +120,7 @@ Variant of 'Log' useful for implementations that need to perform 'IO'.
 class (Log l t IO e s) => LogIO l t e s
 
 data Server l t e v = (LogIO l t e v) => Server {
-    serverId :: Name,
+    serverName :: Name,
     serverLog :: l,
     serverState :: v
 }

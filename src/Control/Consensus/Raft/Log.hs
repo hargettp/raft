@@ -76,6 +76,11 @@ newRaft server = newTVar $ RaftState {
         raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
         raftServer = server
+        {-
+        serverId :: Name,
+        serverLog :: l,
+        serverState :: v
+        -}
     }
 
 {-|
