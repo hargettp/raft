@@ -19,6 +19,7 @@ module TestRaft (
 
 -- local imports
 
+import Control.Consensus.Log
 import Control.Consensus.Raft
 import Control.Consensus.Raft.Client
 import Control.Consensus.Raft.Configuration
@@ -237,7 +238,7 @@ testWithClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
-checkForLeader :: Integer -> Maybe ServerId -> [TVar (RaftState IntLog Int)] -> IO (Maybe ServerId)
+checkForLeader :: Integer -> Maybe Name -> [TVar (RaftState IntLog Int)] -> IO (Maybe Name)
 checkForLeader run possibleLeader vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar vRaft
@@ -257,7 +258,7 @@ checkForLeader run possibleLeader vRafts = do
                         then return leader
                         else return Nothing
 
-allLeaders :: [TVar (RaftState IntLog Int)] -> IO [Maybe ServerId]
+allLeaders :: [TVar (RaftState IntLog Int)] -> IO [Maybe Name]
 allLeaders vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar vRaft
@@ -272,7 +273,7 @@ withClient transport name cfg fn = do
     let client = newClient endpoint name cfg
     fn client
 
-newTestConfiguration :: [ServerId] -> Configuration
+newTestConfiguration :: [Name] -> Configuration
 newTestConfiguration members = (newConfiguration members) {configurationTimeouts = testTimeouts}
 
 pause :: IO ()
@@ -292,7 +293,7 @@ serverTimeout = 2 * (snd $ timeoutElectionRange testTimeouts)
 {-|
 Utility for running a server only for a defined period of time
 -}
-withServer :: Transport -> Configuration -> ServerId -> (IntRaft -> IO ()) -> IO ()
+withServer :: Transport -> Configuration -> Name -> (IntRaft -> IO ()) -> IO ()
 withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name

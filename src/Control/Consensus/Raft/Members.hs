@@ -49,11 +49,13 @@ import Data.Serialize
 
 import GHC.Generics
 
+import Network.Endpoints
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
 data Member = Member {
-    memberName :: ServerId,
+    memberName :: Name,
     memberLogLastAppended :: RaftTime,
     memberLogLastCommitted :: RaftTime
 }
@@ -62,7 +64,7 @@ memberAppendedTerm :: Member -> Term
 memberAppendedTerm member = let RaftTime term _ = memberLogLastAppended member
                         in term
 
-mkMember :: ServerId -> Member
+mkMember :: Name -> Member
 mkMember name = Member {
     memberName = name,
     memberLogLastAppended = RaftTime (-1) (-1),
@@ -75,14 +77,14 @@ updateMember member result = member {
     memberLogLastCommitted = max (memberLogLastCommitted member) (memberLastCommitted result)
     }
 
-type Members = M.Map ServerId Member
+type Members = M.Map Name Member
 
 mkMembers :: Configuration -> Members
 mkMembers cfg = M.fromList $ map (\name -> (name,mkMember name)) (clusterMembers cfg)
 
 data MemberResult = MemberResult {
     memberActionSuccess :: Bool,
-    memberLeader :: Maybe ServerId,
+    memberLeader :: Maybe Name,
     memberCurrentTerm :: Term,
     memberLastAppended :: RaftTime,
     memberLastCommitted :: RaftTime
@@ -99,7 +101,7 @@ mkResult success raft = MemberResult {
     memberLastCommitted = lastCommitted $ serverLog $ raftServer raft
 }
 
-type MemberResults =  M.Map ServerId (Maybe MemberResult)
+type MemberResults =  M.Map Name (Maybe MemberResult)
 
 updateMembers :: Members -> MemberResults -> Members
 updateMembers members results = M.map applyUpdates members

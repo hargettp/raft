@@ -66,7 +66,7 @@ _log :: String
 _log = "raft.protocol"
 
 data AppendEntries =  AppendEntries {
-    aeLeader :: ServerId,
+    aeLeader :: Name,
     aeLeaderTerm :: Term,
     aePreviousTime :: RaftTime,
     aeCommittedTime :: RaftTime,
@@ -76,7 +76,7 @@ data AppendEntries =  AppendEntries {
 instance Serialize AppendEntries
 
 data RequestVote = RequestVote {
-        rvCandidate :: ServerId,
+        rvCandidate :: Name,
         rvCandidateTerm :: Term,
         rvCandidateLastEntryTime :: RaftTime
 } deriving (Eq,Show,Generic)
@@ -129,7 +129,7 @@ methodRequestVote = "requestVote"
 goRequestVote :: CallSite 
                 -> Configuration -- ^^ Cluster configuration
                 -> Term     -- ^^ Candidate's term
-                -> ServerId -- ^^ Candidate's id
+                -> Name -- ^^ Candidate's id
                 -> RaftTime -- ^^ `RaftTime` of candidate's last entry
                 -> IO (M.Map Name (Maybe MemberResult))
 goRequestVote cs cfg term candidate lastEntryTime = do
@@ -149,7 +149,7 @@ methodPerformAction = "performAction"
 
 goPerformAction :: CallSite
                     -> Configuration
-                    -> ServerId
+                    -> Name
                     -> Action
                     -> IO (Maybe MemberResult)
 goPerformAction cs cfg member action = do
@@ -164,7 +164,7 @@ goPerformAction cs cfg member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> Configuration -> ServerId -> (AppendEntries -> IO MemberResult) -> IO (Maybe RaftTime)
+onAppendEntries :: Endpoint -> Configuration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe RaftTime)
 onAppendEntries endpoint cfg server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ configurationTimeouts cfg)
     case msg of
@@ -178,7 +178,7 @@ onAppendEntries endpoint cfg server fn = do
 {-|
 Wait for an 'RequestVote' RPC to arrive, and process it when it arrives.
 -}
-onRequestVote :: Endpoint -> ServerId -> (RequestVote -> IO MemberResult) -> IO Bool
+onRequestVote :: Endpoint -> Name -> (RequestVote -> IO MemberResult) -> IO Bool
 onRequestVote endpoint server fn = do
     (bytes,reply) <- hear endpoint server methodRequestVote
     let Right req = decode bytes
@@ -189,7 +189,7 @@ onRequestVote endpoint server fn = do
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: Endpoint -> ServerId -> (Action -> Reply MemberResult -> IO ()) -> IO ()
+onPerformAction :: Endpoint -> Name -> (Action -> Reply MemberResult -> IO ()) -> IO ()
 onPerformAction endpoint member fn = do
     (bytes,reply) <- hear endpoint member methodPerformAction
     infoM _log $ "Heard performAction on " ++ member

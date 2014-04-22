@@ -42,6 +42,8 @@ import Data.Serialize
 
 import GHC.Generics
 
+import Network.Endpoints
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -81,12 +83,7 @@ data IntLog = IntLog {
 
 instance LogIO IntLog RaftTime RaftLogEntry (ServerState Int)
 
-instance RaftLog IntLog Int where
-    -- logLastAppendedTime :: l -> RaftTime
-    logLastAppendedTime log = numberLogLastAppended log
-
-    -- logLastCommittedTime :: l -> RaftTime
-    logLastCommittedTime log = numberLogLastCommitted log
+instance RaftLog IntLog Int
 
 newIntLog :: IO IntLog
 newIntLog = do
@@ -140,7 +137,7 @@ type IntServer = RaftServer IntLog Int
 
 type IntRaft = Raft IntLog Int
 
-mkIntServer :: Configuration -> ServerId -> Int -> IO IntServer
+mkIntServer :: Configuration -> Name -> Int -> IO IntServer
 mkIntServer cfg sid initial = do
     log <- newIntLog
     return Server {

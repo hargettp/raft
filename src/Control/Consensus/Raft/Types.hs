@@ -16,7 +16,6 @@
 
 module Control.Consensus.Raft.Types (
     -- * General types
-    ServerId,
     Term,
     Timeout,
     Timeouts(..),
@@ -34,16 +33,12 @@ import Data.Serialize
 
 import GHC.Generics
 
-import Network.Endpoints
-
 import qualified System.Random as R
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
 type Term = Int
-
-type ServerId = Name
 
 --------------------------------------------------------------------------------
 -- Timeouts

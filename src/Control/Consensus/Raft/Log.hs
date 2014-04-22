@@ -23,10 +23,9 @@ module Control.Consensus.Raft.Log (
     newRaft,
     RaftState(..),
     RaftServer,
-    RaftLog(..),
+    RaftLog,
     RaftLogEntry(..),
     RaftTime(..),
-    Server(..),
     ServerState(..),
     setRaftTerm,
     setRaftLeader,
@@ -49,6 +48,8 @@ import Data.Serialize
 
 import GHC.Generics
 
+import Network.Endpoints
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -66,9 +67,7 @@ instance Serialize RaftTime
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (LogIO l RaftTime RaftLogEntry (ServerState v)) => RaftLog l v where
-    logLastAppendedTime :: l -> RaftTime
-    logLastCommittedTime :: l -> RaftTime
+class (LogIO l RaftTime RaftLogEntry (ServerState v)) => RaftLog l v
 
 type Raft l v = TVar (RaftState l v)
 
@@ -91,7 +90,7 @@ specific application.
 -}
 data RaftState l v = (RaftLog l v) => RaftState {
     raftCurrentTerm :: Term,
-    raftLastCandidate :: Maybe ServerId,
+    raftLastCandidate :: Maybe Name,
     raftServer :: RaftServer l v
 }
 
@@ -106,7 +105,7 @@ setRaftTerm term raft = raft {
 {-|
 Update the last candidate in a new 'RaftState'
 -}
-setRaftLastCandidate :: Maybe ServerId -> RaftState l v -> RaftState l v
+setRaftLastCandidate :: Maybe Name -> RaftState l v -> RaftState l v
 setRaftLastCandidate candidate raft = raft {
     raftLastCandidate = candidate
 }
@@ -114,7 +113,7 @@ setRaftLastCandidate candidate raft = raft {
 {-|
 Update the 'ServerState' in a new 'RaftState' to specify a new leader
 -}
-setRaftLeader :: Maybe ServerId -> RaftState l v -> RaftState l v
+setRaftLeader :: Maybe Name -> RaftState l v -> RaftState l v
 setRaftLeader leader raft = raft {
     raftServer = (raftServer raft) {
         serverState = (serverState $ raftServer raft) {
@@ -143,12 +142,6 @@ data RaftLogEntry =  RaftLogEntry {
 } deriving (Eq,Show,Generic)
 
 instance Serialize RaftLogEntry
-
-data Server l t e v = (LogIO l t e v) => Server {
-    serverId :: ServerId,
-    serverLog :: l,
-    serverState :: v
-}
 
 data ServerState v = (Eq v,Show v) => ServerState {
     serverConfiguration :: Configuration,
