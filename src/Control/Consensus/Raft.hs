@@ -126,7 +126,7 @@ doFollow vRaft endpoint member leading = do
         if success
             then do
                 let log = serverLog $ raftServer raft
-                newLog <- appendEntries log (aePreviousTime req) (aeEntries req)
+                newLog <- appendEntries log (logIndex $ aePreviousTime req) (aeEntries req)
                 updatedRaft <- atomically $ do 
                         modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
                         readTVar vRaft
@@ -138,7 +138,7 @@ doFollow vRaft endpoint member leading = do
             -- async, we can count on all of these invocations to commit as
             -- being synchronous, so no additional locking required
             raft <- atomically $ readTVar vRaft
-            (log,state) <- commitEntries (serverLog $ raftServer $ raft) committed (serverState $ raftServer $ raft)
+            (log,state) <- commitEntries (serverLog $ raftServer $ raft) (logIndex $ committed) (serverState $ raftServer $ raft)
             atomically $ modifyTVar vRaft $ \oldRaft ->
                         setRaftLog log $ setRaftServerState state oldRaft
             if leading
@@ -156,7 +156,7 @@ doVote vRaft endpoint name leading = do
     log <- atomically $ do
         raft <- readTVar vRaft
         return $ serverLog $ raftServer raft
-    let logLastEntryTime = lastAppended log
+    let logLastEntryTime = lastAppendedTime log
     won <- onRequestVote endpoint name $ \req -> do
         debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
@@ -214,7 +214,7 @@ doVolunteer vRaft endpoint candidate = do
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
         log = serverLog $ raftServer raft
-        RaftTime lastTerm lastIndex = lastAppended log
+        RaftTime lastTerm lastIndex = lastAppendedTime log
     debugM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
     votes <- goRequestVote cs cfg term candidate (RaftTime lastTerm lastIndex)
     debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)
@@ -253,7 +253,7 @@ doPulse :: (RaftLog l v) => TVar (RaftState l v) -> TMVar Index -> IO ()
 doPulse vRaft vLatest = do
     cfg <- atomically $ do
         raft <- readTVar vRaft
-        let index = logIndex $ lastAppended $ serverLog $ raftServer raft
+        let index = lastAppended $ serverLog $ raftServer raft
         empty <- isEmptyTMVar vLatest
         if empty
             then putTMVar vLatest index
@@ -270,15 +270,15 @@ doServe vRaft endpoint leader clients vLatest = do
         raft <- atomically $ readTVar vRaft
         let rlog = serverLog $ raftServer raft
             term = raftCurrentTerm raft
-            nextIndex = (let RaftTime _ i = lastAppended rlog in i) + 1
+            nextIndex = (let RaftTime _ i = lastAppendedTime rlog in i) + 1
         -- TODO this should be changed to append the entries, capture the last appended index,
         -- and put the client on the pending mailbox, broadcast entries to all members.
         -- the leader's commit task will commit once enough members have appended.
-        newLog <- appendEntries rlog (RaftTime term nextIndex) [RaftLogEntry term action]
+        newLog <- appendEntries rlog nextIndex [RaftLogEntry term action]
         atomically $ do
             modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
-            writeMailbox clients (logIndex $ lastAppended newLog,reply)
-        infoM _log $ "Appended action at index " ++ (show $ logIndex $ lastAppended newLog)
+            writeMailbox clients (logIndex $ lastAppendedTime newLog,reply)
+        infoM _log $ "Appended action at index " ++ (show $ logIndex $ lastAppendedTime newLog)
     doServe vRaft endpoint leader clients vLatest
 
 {-|
@@ -294,11 +294,11 @@ doCommit vRaft endpoint leader members pending vLatest = do
     let rlog = serverLog $ raftServer raft
         cs = newCallSite endpoint leader
         term = raftCurrentTerm raft
-        prevTime = lastCommitted rlog
+        prevTime = lastCommittedTime rlog
         cfg = serverConfiguration $ serverState $ raftServer raft
-    (commitTime,entries) <- fetchLatestEntries rlog
+    (commitIndex,entries) <- fetchLatestEntries rlog
     infoM _log $ "Synchronizing from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft) ++ ": " ++ (show entries)
-    results <- goSynchronizeEntries cs cfg term prevTime commitTime entries
+    results <- goSynchronizeEntries cs cfg term prevTime (RaftTime term commitIndex) entries
     infoM _log $ "Synchronized from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
     let newMembers = updateMembers members results
         newAppendedIndex = membersSafeAppendedIndex newMembers
@@ -312,12 +312,12 @@ doCommit vRaft endpoint leader members pending vLatest = do
             return ()
         else do
             (newLog,newState) <- let time = (RaftTime (raftCurrentTerm raft) newAppendedIndex)
-                                     oldCommitedIndex = logIndex $ commitTime
+                                     oldCommitedIndex = commitIndex
                                      count = newAppendedIndex - oldCommitedIndex
                                      in if count > 0
                                         then do
                                             infoM _log $ "Committing at time " ++ (show time)
-                                            commitEntries rlog time (serverState $ raftServer $ raft)
+                                            commitEntries rlog newAppendedIndex (serverState $ raftServer $ raft)
                                         else return (rlog,(serverState $ raftServer $ raft))
             maybeReply <- atomically $ do
                 modifyTVar vRaft $ \oldRaft ->
@@ -326,7 +326,7 @@ doCommit vRaft endpoint leader members pending vLatest = do
                 case maybeClient of
                     Nothing -> return Nothing
                     Just (index,reply) ->
-                        if index <= (logIndex $ lastCommitted newLog)
+                        if index <= (logIndex $ lastCommittedTime newLog)
                             then do
                                 updatedRaft <- readTVar vRaft
                                 _ <- readMailbox pending
@@ -334,7 +334,7 @@ doCommit vRaft endpoint leader members pending vLatest = do
                             else return Nothing
             case maybeReply of
                 Nothing -> do
-                    infoM _log $ "No client at index " ++ (show $ logIndex $ lastCommitted newLog)
+                    infoM _log $ "No client at index " ++ (show $ logIndex $ lastCommittedTime newLog)
                     return ()
                 Just (index,reply) -> do
                     infoM _log $ "Replying at index " ++ (show index)

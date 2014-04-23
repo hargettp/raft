@@ -23,9 +23,10 @@ module Control.Consensus.Raft.Log (
     mkRaft,
     RaftState(..),
     RaftServer,
-    RaftLog,
+    RaftLog(..),
     RaftLogEntry(..),
     RaftTime(..),
+    logIndex,
     ServerState(..),
     setRaftTerm,
     setRaftLeader,
@@ -58,16 +59,17 @@ import Network.Endpoints
 -}
 data RaftTime = RaftTime Term Index deriving (Show,Eq,Ord,Generic)
 
-instance LogTime RaftTime where
-    logIndex (RaftTime _ index) = index
-    nextLogTime (RaftTime term index) = RaftTime term (index + 1)
+logIndex :: RaftTime -> Index
+logIndex (RaftTime _ index) = index
 
 instance Serialize RaftTime
 
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (LogIO l RaftTime RaftLogEntry (ServerState v)) => RaftLog l v
+class (Log l IO RaftLogEntry (ServerState v)) => RaftLog l v where
+    lastAppendedTime :: l -> RaftTime
+    lastCommittedTime :: l -> RaftTime
 
 type Raft l v = TVar (RaftState l v)
 
@@ -76,19 +78,12 @@ mkRaft server = newTVar $ RaftState {
         raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
         raftServer = server
-        {-
-        serverName :: Name, -- raftName
-        serverLog :: l, -- raftLog
-        serverState :: v, -- raftData
-
-        serverConfiguration :: Configuration
-        -}
     }
 
 {-|
 A minimal 'Server' capable of participating in the Raft algorithm.
 -}
-type RaftServer l v = Server l RaftTime RaftLogEntry (ServerState v)
+type RaftServer l v = Server l RaftLogEntry (ServerState v)
 
 {-|
 Encapsulates the state necessary for the Raft algorithm, depending

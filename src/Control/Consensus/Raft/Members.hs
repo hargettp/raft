@@ -97,8 +97,8 @@ mkResult success raft = MemberResult {
     memberActionSuccess = success,
     memberLeader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft,
     memberCurrentTerm = raftCurrentTerm raft,
-    memberLastAppended = lastAppended $ serverLog $ raftServer raft,
-    memberLastCommitted = lastCommitted $ serverLog $ raftServer raft
+    memberLastAppended = lastAppendedTime $ serverLog $ raftServer raft,
+    memberLastCommitted = lastCommittedTime $ serverLog $ raftServer raft
 }
 
 type MemberResults =  M.Map Name (Maybe MemberResult)

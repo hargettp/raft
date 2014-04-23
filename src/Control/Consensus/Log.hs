@@ -22,8 +22,6 @@ module Control.Consensus.Log (
     Index,
     Log(..),
     fetchLatestEntries,
-    LogIO,
-    LogTime(..),
     Server(..)
 
 ) where
@@ -65,7 +63,7 @@ may be unexpected.  While the underyling log implementation may itself be pure, 
 methods are wrapped in a monad to support those implementations that may not be--such
 as a log whose entries are read from disk.
 -}
-class (LogTime t) => Log l t m e s | l -> t,l -> e,l -> s,l -> m where
+class Log l m e s | l -> e,l -> s,l -> m where
     {-|
     Create a new `Log`.
     -}
@@ -73,53 +71,41 @@ class (LogTime t) => Log l t m e s | l -> t,l -> e,l -> s,l -> m where
     {-|
     `LogTime` of last committed entry in the `Log`.
     -}
-    lastCommitted :: l -> t
+    lastCommitted :: l -> Index
     {-|
     `LogTime` of last appended entry (e.g., the end of the `Log`).
     -}
-    lastAppended :: l -> t
+    lastAppended :: l -> Index
     {-|
     Append new log entries into the `Log` after truncating the log
     to remove all entries whose `LogTime` is greater than or equal
     to the specified `LogTime`, although no entries will be overwritten
     if they are already committed.
     -}
-    appendEntries :: l -> t -> [e] -> m l
+    appendEntries :: l -> Index -> [e] -> m l
     {-|
     Retrieve a number of entries starting at the specified `LogTime`
     -}
-    fetchEntries :: l -> t -> Int -> m [e]
+    fetchEntries :: l -> Index -> Int -> m [e]
     {-|
     Commit all entries in the log whose `LogTime` is less than or equal
     to the specified `LogTime`.
     -}
-    commitEntries :: l -> t -> s -> m (l,s)
+    commitEntries :: l -> Index -> s -> m (l,s)
 
 {-|
 Return all entries from the `Log`'s `lastCommitted` time up to and
 including the `lastAppended` time.
 -}
-fetchLatestEntries :: (LogTime t, Monad m, Log l t m e s) => l -> m (t,[e])
+fetchLatestEntries :: (Monad m, Log l m e s) => l -> m (Index,[e])
 fetchLatestEntries log = do
     let commitTime = lastCommitted log
-        startTime = nextLogTime commitTime
-        count = (logIndex $ lastAppended log) - (logIndex $ lastCommitted log)
+        startTime = commitTime + 1
+        count = lastAppended log - lastCommitted log
     entries <- fetchEntries log startTime count
     return (commitTime,entries)
 
-{-|
-Abstract class for defining an offset into a `Log`
--}
-class (Ord t) => LogTime t where
-    logIndex :: t -> Index
-    nextLogTime :: t -> t
-
-{-|
-Variant of 'Log' useful for implementations that need to perform 'IO'.
--}
-class (Log l t IO e s) => LogIO l t e s
-
-data Server l t e v = (LogIO l t e v) => Server {
+data Server l e v = (Log l IO e v) => Server {
     serverName :: Name,
     serverLog :: l,
     serverState :: v
