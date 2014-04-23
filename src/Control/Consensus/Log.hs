@@ -69,27 +69,27 @@ class Log l m e s | l -> e,l -> s,l -> m where
     -}
     mkLog :: m l
     {-|
-    `LogTime` of last committed entry in the `Log`.
+    `Index` of last committed entry in the `Log`.
     -}
     lastCommitted :: l -> Index
     {-|
-    `LogTime` of last appended entry (e.g., the end of the `Log`).
+    `Index` of last appended entry (e.g., the end of the `Log`).
     -}
     lastAppended :: l -> Index
     {-|
     Append new log entries into the `Log` after truncating the log
-    to remove all entries whose `LogTime` is greater than or equal
-    to the specified `LogTime`, although no entries will be overwritten
+    to remove all entries whose `Index` is greater than or equal
+    to the specified `Index`, although no entries will be overwritten
     if they are already committed.
     -}
     appendEntries :: l -> Index -> [e] -> m l
     {-|
-    Retrieve a number of entries starting at the specified `LogTime`
+    Retrieve a number of entries starting at the specified `Index`
     -}
     fetchEntries :: l -> Index -> Int -> m [e]
     {-|
-    Commit all entries in the log whose `LogTime` is less than or equal
-    to the specified `LogTime`.
+    Commit all entries in the log whose `Index` is less than or equal
+    to the specified `Index`.
     -}
     commitEntries :: l -> Index -> s -> m (l,s)
 

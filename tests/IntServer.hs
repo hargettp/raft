@@ -22,7 +22,7 @@ module IntServer (
     IntRaft,
     IntLogEntry(..),
     IntLog,
-    newIntLog,
+    mkIntLog,
     IntServer,
     mkIntServer
 ) where
@@ -83,8 +83,8 @@ instance RaftLog IntLog Int where
     lastAppendedTime = numberLogLastAppended
     lastCommittedTime = numberLogLastCommitted
 
-newIntLog :: IO IntLog
-newIntLog = do
+mkIntLog :: IO IntLog
+mkIntLog = do
     return IntLog {
         numberLogLastCommitted = RaftTime (-1) (-1),
         numberLogLastAppended = RaftTime (-1) (-1),
@@ -93,7 +93,7 @@ newIntLog = do
 
 instance Log IntLog IO RaftLogEntry (ServerState Int) where
 
-    mkLog = newIntLog
+    mkLog = mkIntLog
 
     lastCommitted log = logIndex $ numberLogLastCommitted log
 
@@ -138,7 +138,7 @@ type IntRaft = Raft IntLog Int
 
 mkIntServer :: Configuration -> Name -> Int -> IO IntServer
 mkIntServer cfg sid initial = do
-    log <- newIntLog
+    log <- mkIntLog
     return Server {
         serverName = sid,
         serverLog = log,
