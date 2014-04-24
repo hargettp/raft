@@ -63,7 +63,7 @@ tests = [
     testCase "3cluster-stability" test3ClusterStability,
     testCase "5cluster" test5Cluster,
     testCase "5cluster-stability" test5ClusterStability,
-    testCase "client" testClient,
+    -- testCase "client" testClient,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
     testCase "clientPerformAction" testClientPerformAction,
@@ -81,10 +81,10 @@ test3Cluster = do
     transport <- newMemoryTransport
     let cfg = newTestConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
-        pause >> pause
+        leader <- waitForLeader 5 (1 :: Integer) vRafts
         leaders <- allLeaders vRafts
         infoM _log $ "Leaders are " ++ (show leaders)
-        _ <- checkForLeader (1 :: Integer) Nothing vRafts
+        _ <- checkForConsistency (1 :: Integer) leader vRafts
         return ()
 
 test3ClusterStability :: Assertion
@@ -92,10 +92,10 @@ test3ClusterStability = do
     transport <- newMemoryTransport
     let cfg = newTestConfiguration ["server1","server2","server3"]
     with3Servers  transport cfg $ \vRafts -> do
+        firstLeader <- waitForLeader 5 (1 :: Integer) vRafts
+        _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         pause >> pause
-        firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
-        pause >> pause
-        _ <- checkForLeader (2 :: Integer) firstLeader vRafts
+        _ <- checkForConsistency (2 :: Integer) firstLeader vRafts
         return ()
 
 test5Cluster :: Assertion
@@ -103,8 +103,8 @@ test5Cluster = do
     transport <- newMemoryTransport
     let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
     with5Servers  transport cfg $ \vRafts -> do
-        pause >> pause >> pause
-        _ <- checkForLeader (1 :: Integer) Nothing vRafts
+        firstLeader <- waitForLeader 5 (1 :: Integer) vRafts
+        _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         return ()
 
 test5ClusterStability :: Assertion
@@ -112,24 +112,34 @@ test5ClusterStability = do
     transport <- newMemoryTransport
     let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
     with5Servers  transport cfg $ \vRafts -> do
+        firstLeader <- waitForLeader 5 (1 :: Integer) vRafts
+        _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         pause >> pause >> pause
-        firstLeader <- checkForLeader (1 :: Integer) Nothing vRafts
-        pause >> pause >> pause
-        _ <- checkForLeader (2 :: Integer) firstLeader vRafts
+        _ <- checkForConsistency (2 :: Integer) firstLeader vRafts
         return ()
 
+{-
 testClient :: Assertion
 testClient = do
     transport <- newMemoryTransport
     let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \_ -> do
+    with3Servers  transport cfg $ \vRafts -> do
         pause
-        Right clientResult <- race (pause >> pause)
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
             (withClient transport "client1" cfg $ \client -> do
-                                pause
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
                                 performAction client $ Cmd $ encode $ Add 1)
-        let RaftTime _ clientIndex = clientResult
-        assertBool "Client index should be -1" $ clientIndex == -1
+        case errOrResult of
+            Right clientResult -> do
+                let RaftTime _ clientIndex = clientResult
+                assertBool "Client index should be -1" $ clientIndex == -1
+            Left err -> do
+                errorM _log $ "Error performing action : " ++ (show err)
+                assertBool "Performing action failed" False
+-}
 
 testPerformAction :: Assertion
 testPerformAction = do
@@ -238,8 +248,8 @@ testWithClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
-checkForLeader :: Integer -> Maybe Name -> [TVar (RaftState IntLog Int)] -> IO (Maybe Name)
-checkForLeader run possibleLeader vRafts = do
+checkForConsistency :: Integer -> Maybe Name -> [TVar (RaftState IntLog Int)] -> IO (Maybe Name)
+checkForConsistency run possibleLeader vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar vRaft
         return $ raftServer raft) vRafts
@@ -257,6 +267,29 @@ checkForLeader run possibleLeader vRafts = do
         Nothing -> if all (== leader) leaders
                         then return leader
                         else return Nothing
+
+waitForLeader :: Integer -> Integer -> [TVar (RaftState IntLog Int)] -> IO (Maybe Name)
+waitForLeader maxCount attempt vRafts = do
+    servers <- mapM (\vRaft -> do
+        raft <- atomically $ readTVar vRaft
+        return $ raftServer raft) vRafts
+    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+        leader = leaders !! 0
+    if maxCount <= 0
+        then do
+            assertBool ("No leader found after " ++ (show (attempt - 1)) ++ " rounds: " ++ (show leaders)) False
+            return Nothing
+        else do
+            pause
+            if (leader /= Nothing) && (all (== leader) leaders)
+                then do
+                    let msg = "After " ++ (show attempt) ++ " rounds, the leader is " ++ (show leader)
+                    if attempt > 2
+                        then warningM _log msg
+                        else infoM _log msg
+                    return leader
+                else
+                    waitForLeader (maxCount - 1) (attempt + 1) vRafts
 
 allLeaders :: [TVar (RaftState IntLog Int)] -> IO [Maybe Name]
 allLeaders vRafts = do

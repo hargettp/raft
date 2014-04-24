@@ -245,7 +245,7 @@ lead vRaft endpoint name = do
     infoM _log $ "Server " ++ name ++ " leading in term " ++ (show term)
     raceAll_ $ [doPulse vRaft vLatest,
                 doVote vRaft endpoint leader True,
-                doFollow vRaft endpoint leader True,
+                doFollow vRaft endpoint name True,
                 doServe vRaft endpoint leader clients vLatest,
                 doCommit vRaft endpoint leader members clients vLatest]
 
@@ -278,7 +278,7 @@ doServe vRaft endpoint leader clients vLatest = do
         atomically $ do
             modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
             writeMailbox clients (logIndex $ lastAppendedTime newLog,reply)
-        infoM _log $ "Appended action at index " ++ (show $ logIndex $ lastAppendedTime newLog)
+        infoM _log $ "Appended action at index " ++ (show $ lastAppended newLog)
     doServe vRaft endpoint leader clients vLatest
 
 {-|

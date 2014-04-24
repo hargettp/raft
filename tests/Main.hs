@@ -37,7 +37,7 @@ initLogging = do
     then removeFile logFile
     else return ()
   s <- streamHandler stdout INFO
-  let fs = setFormatter s $ simpleLogFormatter "$time - $msg"
+  let fs = setFormatter s $ simpleLogFormatter "$time [$prio] - $msg"
   updateGlobalLogger rootLoggerName (setLevel WARNING)
   updateGlobalLogger rootLoggerName $ setHandlers [fs]
 

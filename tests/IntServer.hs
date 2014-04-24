@@ -100,11 +100,14 @@ instance Log IntLog IO RaftLogEntry (ServerState Int) where
     lastAppended log = logIndex $ numberLogLastAppended log
 
     appendEntries log index newEntries = do
-        let term = maximum $ map entryTerm newEntries
-        return log {
-            numberLogLastAppended = RaftTime term (index + (length newEntries) - 1),
-            numberLogEntries = (take (index + 1) (numberLogEntries log)) ++ newEntries
-        }
+        if null newEntries
+            then return log
+            else do
+                let term = maximum $ map entryTerm newEntries
+                return log {
+                    numberLogLastAppended = RaftTime term (index + (length newEntries) - 1),
+                    numberLogEntries = (take (index + 1) (numberLogEntries log)) ++ newEntries
+                }
     fetchEntries log index count = do
         let entries = numberLogEntries log
         return $ take count $ drop index entries
