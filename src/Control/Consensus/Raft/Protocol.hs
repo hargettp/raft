@@ -29,7 +29,6 @@ module Control.Consensus.Raft.Protocol (
 
     -- * Leader calls
     goAppendEntries,
-    goSynchronizeEntries,
     goRequestVote,
     onPerformAction,
 
@@ -88,29 +87,12 @@ methodAppendEntries = "appendEntries"
 
 goAppendEntries :: CallSite
             -> Configuration            -- ^^ Cluster configuration
-            -> Name                     -- ^^ Member that is target of the call
-            -> Term                     -- ^^ Leader's current term
-            -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
-            -> RaftTime                    -- ^^ Last index up to which all entries are committed on leader
-            -> [RaftLogEntry]    -- ^^ Entries to append
-            -> IO (Maybe MemberResult)
-goAppendEntries cs cfg member term prevTime commitTime entries = do
-    let Just leader = clusterLeader cfg
-    response <- callWithTimeout cs member methodAppendEntries (timeoutRpc $ configurationTimeouts cfg)
-        $ encode $ AppendEntries leader term prevTime commitTime entries
-    case response of
-        Just bytes -> let Right results = decode bytes
-                      in return $ Just results
-        _ -> return Nothing
-
-goSynchronizeEntries :: CallSite
-            -> Configuration            -- ^^ Cluster configuration
             -> Term                     -- ^^ Leader's current term
             -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
             -> RaftTime                 -- ^^ Last index up to which all entries are committed on leader
             -> [RaftLogEntry]    -- ^^ Entries to append
             -> IO (M.Map Name (Maybe MemberResult))
-goSynchronizeEntries cs cfg term prevTime commitTime entries = do
+goAppendEntries cs cfg term prevTime commitTime entries = do
     let Just leader = clusterLeader cfg
         members = clusterMembers cfg
         timeout = (timeoutRpc $ configurationTimeouts cfg)

@@ -287,7 +287,7 @@ doCommit vRaft endpoint leader members pending vLatest = do
         cfg = serverConfiguration $ serverState $ raftServer raft
     (commitIndex,entries) <- fetchLatestEntries rlog
     infoM _log $ "Synchronizing from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft) ++ ": " ++ (show entries)
-    results <- goSynchronizeEntries cs cfg term prevTime (RaftTime term commitIndex) entries
+    results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
     infoM _log $ "Synchronized from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
     let newMembers = updateMembers members results
         newAppendedIndex = membersSafeAppendedIndex newMembers
