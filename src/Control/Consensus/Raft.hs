@@ -95,16 +95,16 @@ follow vRaft endpoint name = do
     as necessary, and stop when no heartbeat received.
 -}
 doFollow :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> Name -> Bool -> IO ()
-doFollow vRaft endpoint member leading = do
+doFollow vRaft endpoint name leading = do
     -- TOD what if we're the leader and we're processing a message
     -- we sent earlier?
     cfg <- atomically $ do
         raft <- readTVar vRaft
         return $ serverConfiguration $ serverState $ raftServer raft
-    maybeCommitted <- onAppendEntries endpoint cfg member $ \req -> do
-        debugM _log $ "Server " ++ member ++ " received " ++ (show req)
-        infoM _log $ "Server " ++ member ++ " received pulse from " ++ (aeLeader req)
-        (success, raft) <- atomically $ do
+    maybeCommitted <- onAppendEntries endpoint cfg name $ \req -> do
+        debugM _log $ "Server " ++ name ++ " received " ++ (show req)
+        infoM _log $ "Server " ++ name ++ " received pulse from " ++ (aeLeader req)
+        (valid, raft) <- atomically $ do
             raft <-readTVar vRaft
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
                 then return (False,raft)
@@ -122,18 +122,22 @@ doFollow vRaft endpoint member leading = do
                                         $ setRaftLastCandidate Nothing oldRaft
                                 else return ()
                     -- we assume terms are equal if we're here
-                    return (True,raft)
-        if success
+                    let log = serverLog $ raftServer raft
+                    -- check previous entry for consistency
+                    return ( (lastAppendedTime log) == (aePreviousTime req),raft)
+        if valid || leading
             then do
                 let log = serverLog $ raftServer raft
-                newLog <- appendEntries log (logIndex $ aePreviousTime req) (aeEntries req)
-                updatedRaft <- atomically $ do 
+                    index = (1 + (logIndex $ aePreviousTime req))
+                newLog <- appendEntries log index (aeEntries req)
+                updatedRaft <- atomically $ do
                         modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
                         readTVar vRaft
-                return $ mkResult success updatedRaft
-            else return $ mkResult success raft
+                return $ mkResult valid updatedRaft
+            else return $ mkResult valid raft
     case maybeCommitted of
-        Just committed ->  do
+        -- we did hear a message before the timeout, and we have a committed time
+        Just (leader,committed) ->  do
             -- what is good here is that since there is only 1 doFollow
             -- async, we can count on all of these invocations to commit as
             -- being synchronous, so no additional locking required
@@ -141,12 +145,11 @@ doFollow vRaft endpoint member leading = do
             (log,state) <- commitEntries (serverLog $ raftServer $ raft) (logIndex $ committed) (serverState $ raftServer $ raft)
             atomically $ modifyTVar vRaft $ \oldRaft ->
                         setRaftLog log $ setRaftServerState state oldRaft
-            if leading
+            if leading && (name /= leader)
                 then return ()
-                else doFollow vRaft endpoint member leading
-        Nothing -> if leading
-            then doFollow vRaft endpoint member leading
-            else return ()
+                else doFollow vRaft endpoint name leading
+        -- we heard no message before timeout
+        Nothing -> return ()
 
 {-|
 Wait for request vote requests and process them
@@ -277,7 +280,7 @@ doServe vRaft endpoint leader clients vLatest = do
         newLog <- appendEntries rlog nextIndex [RaftLogEntry term action]
         atomically $ do
             modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
-            writeMailbox clients (logIndex $ lastAppendedTime newLog,reply)
+            writeMailbox clients (lastAppended newLog,reply)
         infoM _log $ "Appended action at index " ++ (show $ lastAppended newLog)
     doServe vRaft endpoint leader clients vLatest
 
@@ -303,7 +306,7 @@ doCommit vRaft endpoint leader members pending vLatest = do
     let newMembers = updateMembers members results
         newAppendedIndex = membersSafeAppendedIndex newMembers
         newTerm = membersHighestTerm newMembers
-    infoM _log $ "Safe appended index is " ++ (show newAppendedIndex) ++ ": " ++ (show $ membersAppendedIndex members)
+    infoM _log $ "Safe appended index is " ++ (show newAppendedIndex) ++ ": " ++ (show newAppendedIndex)
     if newTerm > (raftCurrentTerm raft)
         then do
             infoM _log $ "Leading stepping down; new term " ++ (show newTerm) ++ " discovered"

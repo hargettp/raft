@@ -63,7 +63,7 @@ tests = [
     testCase "3cluster-stability" test3ClusterStability,
     testCase "5cluster" test5Cluster,
     testCase "5cluster-stability" test5ClusterStability,
-    -- testCase "client" testClient,
+    testCase "client" testClient,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
     testCase "clientPerformAction" testClientPerformAction,
@@ -118,7 +118,6 @@ test5ClusterStability = do
         _ <- checkForConsistency (2 :: Integer) firstLeader vRafts
         return ()
 
-{-
 testClient :: Assertion
 testClient = do
     transport <- newMemoryTransport
@@ -135,11 +134,9 @@ testClient = do
         case errOrResult of
             Right clientResult -> do
                 let RaftTime _ clientIndex = clientResult
-                assertBool "Client index should be -1" $ clientIndex == -1
-            Left err -> do
-                errorM _log $ "Error performing action : " ++ (show err)
+                assertBool "Client index should be 0" $ clientIndex == 0
+            Left _ -> do
                 assertBool "Performing action failed" False
--}
 
 testPerformAction :: Assertion
 testPerformAction = do

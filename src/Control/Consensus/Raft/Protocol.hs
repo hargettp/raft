@@ -112,7 +112,7 @@ goSynchronizeEntries :: CallSite
             -> IO (M.Map Name (Maybe MemberResult))
 goSynchronizeEntries cs cfg term prevTime commitTime entries = do
     let Just leader = clusterLeader cfg
-        members = clusterMembersOnly cfg
+        members = clusterMembers cfg
         timeout = (timeoutRpc $ configurationTimeouts cfg)
     results <- gcallWithTimeout cs members methodAppendEntries timeout
         $ encode $ AppendEntries leader term prevTime commitTime entries
@@ -164,7 +164,7 @@ goPerformAction cs cfg member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> Configuration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe RaftTime)
+onAppendEntries :: Endpoint -> Configuration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe (Name,RaftTime))
 onAppendEntries endpoint cfg server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ configurationTimeouts cfg)
     case msg of
@@ -172,7 +172,7 @@ onAppendEntries endpoint cfg server fn = do
             let Right req = decode bytes
             result <- fn req
             reply $ encode result
-            return $ Just $ aeCommittedTime req
+            return $ Just (aeLeader req,aeCommittedTime req)
         Nothing -> return Nothing
 
 {-|

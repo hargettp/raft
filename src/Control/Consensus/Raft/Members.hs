@@ -58,7 +58,7 @@ data Member = Member {
     memberName :: Name,
     memberLogLastAppended :: RaftTime,
     memberLogLastCommitted :: RaftTime
-}
+} deriving (Show)
 
 memberAppendedTerm :: Member -> Term
 memberAppendedTerm member = let RaftTime term _ = memberLogLastAppended member
