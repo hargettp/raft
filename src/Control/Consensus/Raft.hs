@@ -125,7 +125,7 @@ doFollow vRaft endpoint name leading = do
                     let log = serverLog $ raftServer raft
                     -- check previous entry for consistency
                     return ( (lastAppendedTime log) == (aePreviousTime req),raft)
-        if valid || leading
+        if valid || not leading
             then do
                 let log = serverLog $ raftServer raft
                     index = (1 + (logIndex $ aePreviousTime req))
