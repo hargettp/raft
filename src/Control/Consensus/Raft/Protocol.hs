@@ -126,7 +126,7 @@ goSynchronizeEntries cs cfg term prevTime commitTime entries = do
 methodRequestVote :: String
 methodRequestVote = "requestVote"
 
-goRequestVote :: CallSite 
+goRequestVote :: CallSite
                 -> Configuration -- ^^ Cluster configuration
                 -> Term     -- ^^ Candidate's term
                 -> Name -- ^^ Candidate's id

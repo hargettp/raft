@@ -109,19 +109,11 @@ doFollow vRaft endpoint name leading = do
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
                 then return (False,raft)
                 else do
-                    -- first update term and leader
-                    if (aeLeaderTerm req) > (raftCurrentTerm raft)
-                        then  modifyTVar vRaft $ \oldRaft ->
+                    -- first update raft state
+                    modifyTVar vRaft $ \oldRaft ->
                             setRaftTerm (aeLeaderTerm req)
                                 $ setRaftLeader (Just $ aeLeader req)
                                 $ setRaftLastCandidate Nothing oldRaft
-                        else if ((aeLeaderTerm req) == (raftCurrentTerm raft)) &&
-                                    Nothing == (clusterLeader $ serverConfiguration $ serverState $ raftServer raft)
-                                then modifyTVar vRaft $ \oldRaft ->
-                                    setRaftLeader (Just $ aeLeader req)
-                                        $ setRaftLastCandidate Nothing oldRaft
-                                else return ()
-                    -- we assume terms are equal if we're here
                     let log = serverLog $ raftServer raft
                     -- check previous entry for consistency
                     return ( (lastAppendedTime log) == (aePreviousTime req),raft)
@@ -156,32 +148,27 @@ Wait for request vote requests and process them
 -}
 doVote :: (RaftLog l v) => TVar (RaftState l v) -> Endpoint -> Name -> Bool -> IO ()
 doVote vRaft endpoint name leading = do
-    log <- atomically $ do
-        raft <- readTVar vRaft
-        return $ serverLog $ raftServer raft
-    let logLastEntryTime = lastAppendedTime log
     won <- onRequestVote endpoint name $ \req -> do
         debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
             raft <- readTVar vRaft
+            let log = serverLog $ raftServer raft
             if (rvCandidateTerm req) < (raftCurrentTerm raft)
                 then return (raft,False,"Candidate term too old")
                 else do
-                    modifyTVar vRaft $ \oldRaft -> 
-                            let newTerm = max (raftCurrentTerm oldRaft) (rvCandidateTerm req)
-                            in setRaftTerm newTerm oldRaft
+                    modifyTVar vRaft $ \oldRaft -> setRaftTerm (rvCandidateTerm req) oldRaft
                     case raftLastCandidate raft of
                         Just candidate -> do
                             if (candidate == rvCandidate req)
                                 then return (raft,True,"Candidate already seen")
                                 else return (raft,False,"Already saw different candidate")
                         Nothing -> do
-                            modifyTVar vRaft $ \oldRaft -> 
+                            modifyTVar vRaft $ \oldRaft ->
                                     setRaftLastCandidate (Just $ rvCandidate req) oldRaft
                             if name == rvCandidate req
                                 then return (raft,True,"Voting for self")
                                 else do
-                                    if (rvCandidateLastEntryTime req) >= logLastEntryTime
+                                    if (rvCandidateLastEntryTime req) >= (lastAppendedTime log)
                                         then do
                                             modifyTVar vRaft $ \oldRaft -> 
                                                 setRaftLastCandidate (Just $ rvCandidate req) oldRaft
@@ -241,16 +228,15 @@ lead vRaft endpoint name = do
         readTVar vRaft
     let cfg = serverConfiguration $ serverState $ raftServer raft
         members = mkMembers cfg
-        leader = name
         term = raftCurrentTerm raft
     clients <- atomically $ newMailbox
     vLatest <- atomically $ newEmptyTMVar
     infoM _log $ "Server " ++ name ++ " leading in term " ++ (show term)
     raceAll_ $ [doPulse vRaft vLatest,
-                doVote vRaft endpoint leader True,
+                doVote vRaft endpoint name True,
                 doFollow vRaft endpoint name True,
-                doServe vRaft endpoint leader clients vLatest,
-                doCommit vRaft endpoint leader members clients vLatest]
+                doServe vRaft endpoint name clients vLatest,
+                doCommit vRaft endpoint name members clients vLatest]
 
 doPulse :: (RaftLog l v) => TVar (RaftState l v) -> TMVar Index -> IO ()
 doPulse vRaft vLatest = do
