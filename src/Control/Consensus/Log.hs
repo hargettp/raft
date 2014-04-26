@@ -22,15 +22,13 @@ module Control.Consensus.Log (
     Index,
     Log(..),
     fetchLatestEntries,
-    Server(..)
+    State(..)
 
 ) where
 
 -- local imports
 
 -- external imports
-
-import Network.Endpoints
 
 import Prelude hiding (log)
 
@@ -63,7 +61,7 @@ may be unexpected.  While the underyling log implementation may itself be pure, 
 methods are wrapped in a monad to support those implementations that may not be--such
 as a log whose entries are read from disk.
 -}
-class Log l m e s | l -> e,l -> s,l -> m where
+class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     {-|
     Create a new `Log`.
     -}
@@ -88,10 +86,46 @@ class Log l m e s | l -> e,l -> s,l -> m where
     -}
     fetchEntries :: l -> Index -> Int -> m [e]
     {-|
-    Commit all entries in the log whose `Index` is less than or equal
-    to the specified `Index`.
+    For each uncommitted entry whose `Index` is less than or equal to the
+    specified index, apply the entry to the supplied `State` using `applyEntry`,
+    then mark the entry as committed in the `Log`. Note that implementers are
+    free to commit no entries, some entries, or all entries as needed to handle
+    errors.  However, the implementation should eventually commit all entries
+    if the calling application is well-behaved.
     -}
     commitEntries :: l -> Index -> s -> m (l,s)
+    commitEntries initialLog index initialState = do
+        let committed = lastCommitted initialLog
+            count = index - committed
+        if count > 0
+            then do
+                let nextCommitted = committed + 1
+                uncommitted <- fetchEntries initialLog nextCommitted count
+                commit initialLog initialState nextCommitted uncommitted 
+            else return (initialLog,initialState)
+        where
+            commit oldLog oldState _ [] = do
+                return (oldLog,oldState)
+            commit oldLog oldState commitIndex (entry:rest) = do
+                newLog <- commitEntry oldLog commitIndex entry
+                newState <- applyEntry oldState entry
+                commit newLog newState (commitIndex + 1)  rest
+
+    {-|
+    Records a single entry in the log as committed; note that
+    this does not involve any external `State` to which the entry
+    must be applied, as that is a separate operation.
+    -}
+    commitEntry :: l -> Index -> e -> m l
+
+{-
+`Log`s operate on `State`: that is, when committing, the log applies each
+entry to the current `State`, and produces a new `State`. Application of each
+entry operates within a chosen `Monad`, so implementers are free to implement 
+`State` as needed (e.g., use `IO`, `STM`, etc.).
+-}
+class (Monad m) => State s m e where
+    applyEntry :: s -> e -> m s
 
 {-|
 Return all entries from the `Log`'s `lastCommitted` time up to and
@@ -104,9 +138,3 @@ fetchLatestEntries log = do
         count = lastAppended log - lastCommitted log
     entries <- fetchEntries log startTime count
     return (commitTime,entries)
-
-data Server l e v = (Log l IO e v) => Server {
-    serverName :: Name,
-    serverLog :: l,
-    serverState :: v
-}

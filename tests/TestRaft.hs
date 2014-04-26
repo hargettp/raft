@@ -19,7 +19,6 @@ module TestRaft (
 
 -- local imports
 
-import Control.Consensus.Log
 import Control.Consensus.Raft
 import Control.Consensus.Raft.Client
 import Control.Consensus.Raft.Configuration
@@ -245,7 +244,7 @@ testWithClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
-checkForConsistency :: Integer -> Maybe Name -> [TVar (RaftState IntLog Int)] -> IO (Maybe Name)
+checkForConsistency :: Integer -> Maybe Name -> [TVar (RaftContext IntLog IntState)] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar vRaft
@@ -253,7 +252,7 @@ checkForConsistency run possibleLeader vRafts = do
     let leaders = map (clusterLeader . serverConfiguration . serverState) servers
         results = map (serverData . serverState)  servers
     -- all results should be equal--and since we didn't perform any commands, should still be 0
-    assertBool ((show run) ++ ": All results should be equal") $ all (== 0) results
+    assertBool ((show run) ++ ": All results should be equal") $ all (== (IntState 0)) results
     assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
     assertBool ((show run) ++ ": There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
     let leader = (leaders !! 0)
@@ -265,7 +264,7 @@ checkForConsistency run possibleLeader vRafts = do
                         then return leader
                         else return Nothing
 
-waitForLeader :: Integer -> Integer -> [TVar (RaftState IntLog Int)] -> IO (Maybe Name)
+waitForLeader :: Integer -> Integer -> [TVar (RaftContext IntLog IntState)] -> IO (Maybe Name)
 waitForLeader maxCount attempt vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar vRaft
@@ -288,7 +287,7 @@ waitForLeader maxCount attempt vRafts = do
                 else
                     waitForLeader (maxCount - 1) (attempt + 1) vRafts
 
-allLeaders :: [TVar (RaftState IntLog Int)] -> IO [Maybe Name]
+allLeaders :: [TVar (RaftContext IntLog IntState)] -> IO [Maybe Name]
 allLeaders vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar vRaft

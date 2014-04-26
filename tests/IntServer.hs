@@ -22,6 +22,7 @@ module IntServer (
     IntRaft,
     IntLogEntry(..),
     IntLog,
+    IntState(..),
     mkIntLog,
     IntServer,
     mkIntServer
@@ -54,18 +55,22 @@ data IntCommand = Add Int
 
 instance Serialize IntCommand
 
-applyAction :: ServerState Int -> Action -> ServerState Int
-applyAction initial (Cmd cmd) = let Right icmd = decode cmd
+data IntState = IntState Int deriving (Eq,Show)
+
+{-
+applyAction :: Int -> Command -> Int
+applyAction initial cmd = let Right icmd = decode cmd
                                in applyIntCommand initial icmd
 applyAction initial action = initial {
     serverConfiguration = applyConfigurationAction (serverConfiguration initial) action
     }
+-}
 
-applyIntCommand :: ServerState Int -> IntCommand -> ServerState Int
-applyIntCommand initial (Add value) = initial {serverData = (serverData initial) + value}
-applyIntCommand initial (Subtract value) = initial {serverData = (serverData initial) - value}
-applyIntCommand initial (Multiply value) = initial {serverData = (serverData initial) * value}
-applyIntCommand initial (Divide value) = initial {serverData = (serverData initial) `quot` value}
+applyIntCommand :: IntState -> IntCommand -> IO IntState
+applyIntCommand (IntState initial) (Add value) = return $ IntState $ initial + value
+applyIntCommand (IntState initial) (Subtract value) = return $ IntState $ initial - value
+applyIntCommand (IntState initial) (Multiply value) = return $ IntState $ initial  * value
+applyIntCommand (IntState initial) (Divide value) = return $ IntState $ initial `quot` value
 
 data IntLogEntry = IntLogEntry {
     entryCommand :: IntCommand
@@ -79,7 +84,7 @@ data IntLog = IntLog {
     numberLogEntries :: [RaftLogEntry]
 }
 
-instance RaftLog IntLog Int where
+instance RaftLog IntLog IntState where
     lastAppendedTime = numberLogLastAppended
     lastCommittedTime = numberLogLastCommitted
 
@@ -91,7 +96,13 @@ mkIntLog = do
         numberLogEntries = []
     }
 
-instance Log IntLog IO RaftLogEntry (ServerState Int) where
+instance State IntState IO Command where
+
+    applyEntry initial cmd = do
+        let Right icmd = decode cmd
+        applyIntCommand initial icmd
+
+instance Log IntLog IO RaftLogEntry (RaftState IntState) where
 
     mkLog = mkIntLog
 
@@ -112,41 +123,24 @@ instance Log IntLog IO RaftLogEntry (ServerState Int) where
         let entries = numberLogEntries log
         return $ take count $ drop index entries
 
-    commitEntries initialLog index initialState = do
-        let committed = logIndex $ numberLogLastCommitted initialLog
-            count = index - committed
-        if count > 0
-            then do
-                let nextCommitted = committed + 1
-                uncommitted <- fetchEntries initialLog nextCommitted count
-                commit initialLog initialState nextCommitted uncommitted 
-            else return (initialLog,initialState)
-        where
-            applyEntry oldState entry = applyAction oldState $ entryAction entry
-            commitEntry oldLog commitIndex entry =
-                let newLog = oldLog {
-                        numberLogLastCommitted = RaftTime (entryTerm entry) commitIndex
-                        }
-                    in newLog
-            commit oldLog oldState _ [] = do
-                return (oldLog,oldState)
-            commit oldLog oldState commitIndex (entry:rest) = do
-                let newState = applyEntry oldState entry
-                    newLog = commitEntry oldLog commitIndex entry
-                commit newLog newState (commitIndex + 1)  rest
+    commitEntry oldLog commitIndex entry = do
+        let newLog = oldLog {
+                numberLogLastCommitted = RaftTime (entryTerm entry) commitIndex
+                }
+        return newLog
 
-type IntServer = RaftServer IntLog Int
+type IntServer = RaftServer IntLog IntState
 
-type IntRaft = Raft IntLog Int
+type IntRaft = Raft IntLog IntState
 
 mkIntServer :: Configuration -> Name -> Int -> IO IntServer
 mkIntServer cfg sid initial = do
     log <- mkIntLog
-    return Server {
+    return RaftServer {
         serverName = sid,
         serverLog = log,
-        serverState = ServerState {
+        serverState = RaftState {
             serverConfiguration = cfg,
-            serverData = initial
+            serverData = IntState initial
             }
     }

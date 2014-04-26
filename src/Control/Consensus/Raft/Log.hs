@@ -21,18 +21,18 @@ module Control.Consensus.Raft.Log (
     -- * Raft state
     Raft,
     mkRaft,
-    RaftState(..),
-    RaftServer,
+    RaftContext(..),
+    RaftServer(..),
     RaftLog(..),
     RaftLogEntry(..),
     RaftTime(..),
     logIndex,
-    ServerState(..),
+    RaftState(..),
     setRaftTerm,
     setRaftLeader,
     setRaftLastCandidate,
     setRaftLog,
-    setRaftServerState
+    setRaftState
 ) where
 
 -- local imports
@@ -67,14 +67,14 @@ instance Serialize RaftTime
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (Log l IO RaftLogEntry (ServerState v)) => RaftLog l v where
+class (Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
     lastAppendedTime :: l -> RaftTime
     lastCommittedTime :: l -> RaftTime
 
-type Raft l v = TVar (RaftState l v)
+type Raft l v = TVar (RaftContext l v)
 
 mkRaft :: (RaftLog l v) => RaftServer l v -> STM (Raft l v)
-mkRaft server = newTVar $ RaftState {
+mkRaft server = newTVar $ RaftContext {
         raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
         raftServer = server
@@ -83,39 +83,44 @@ mkRaft server = newTVar $ RaftState {
 {-|
 A minimal 'Server' capable of participating in the Raft algorithm.
 -}
-type RaftServer l v = Server l RaftLogEntry (ServerState v)
+data RaftServer l v = (Log l IO RaftLogEntry (RaftState v)) => RaftServer {
+    serverName :: Name,
+    serverLog :: l,
+    serverState :: RaftState v
+}
+
 
 {-|
 Encapsulates the state necessary for the Raft algorithm, depending
 on a 'RaftServer' for customizing the use of the algorithm to a 
 specific application.
 -}
-data RaftState l v = (RaftLog l v) => RaftState {
+data RaftContext l v = (RaftLog l v) => RaftContext {
     raftCurrentTerm :: Term,
     raftLastCandidate :: Maybe Name,
     raftServer :: RaftServer l v
 }
 
 {-|
-Update the current term in a new 'RaftState'
+Update the current term in a new 'RaftContext'
 -}
-setRaftTerm :: Term -> RaftState l v -> RaftState l v
+setRaftTerm :: Term -> RaftContext l v -> RaftContext l v
 setRaftTerm term raft = raft {
     raftCurrentTerm = term
 }
 
 {-|
-Update the last candidate in a new 'RaftState'
+Update the last candidate in a new 'RaftContext'
 -}
-setRaftLastCandidate :: Maybe Name -> RaftState l v -> RaftState l v
+setRaftLastCandidate :: Maybe Name -> RaftContext l v -> RaftContext l v
 setRaftLastCandidate candidate raft = raft {
     raftLastCandidate = candidate
 }
 
 {-|
-Update the 'ServerState' in a new 'RaftState' to specify a new leader
+Update the 'RaftState' in a new 'RaftContext' to specify a new leader
 -}
-setRaftLeader :: Maybe Name -> RaftState l v -> RaftState l v
+setRaftLeader :: Maybe Name -> RaftContext l v -> RaftContext l v
 setRaftLeader leader raft = raft {
     raftServer = (raftServer raft) {
         serverState = (serverState $ raftServer raft) {
@@ -124,15 +129,15 @@ setRaftLeader leader raft = raft {
             }}}
 }
 
-setRaftLog :: (RaftLog l v) => l -> RaftState l v -> RaftState l v
+setRaftLog :: (RaftLog l v) => l -> RaftContext l v -> RaftContext l v
 setRaftLog rlog raft = raft {
     raftServer = (raftServer raft) {
             serverLog = rlog
         }
     }
 
-setRaftServerState :: (RaftLog l v) => ServerState v -> RaftState l v -> RaftState l v
-setRaftServerState state raft = raft {
+setRaftState :: (RaftLog l v) => RaftState v -> RaftContext l v -> RaftContext l v
+setRaftState state raft = raft {
     raftServer = (raftServer raft) {
             serverState = state
         }
@@ -145,10 +150,22 @@ data RaftLogEntry =  RaftLogEntry {
 
 instance Serialize RaftLogEntry
 
-data ServerState v = (Eq v,Show v) => ServerState {
+data RaftState v = (Eq v, Show v) => RaftState {
     serverConfiguration :: Configuration,
     serverData :: v
 }
 
-deriving instance Eq (ServerState v)
-deriving instance Show (ServerState v)
+deriving instance Eq (RaftState v)
+deriving instance Show (RaftState v)
+
+instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
+    applyEntry oldRaftState entry = applyAction $ entryAction entry
+        where
+            applyAction (Cmd cmd) = do
+                let RaftState _ oldData = oldRaftState
+                newData <- applyEntry oldData cmd
+                return $ oldRaftState {serverData = newData}
+            applyAction action = do
+                return $ oldRaftState {
+                serverConfiguration = applyConfigurationAction (serverConfiguration oldRaftState) action
+                }

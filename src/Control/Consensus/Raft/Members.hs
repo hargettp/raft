@@ -92,7 +92,7 @@ data MemberResult = MemberResult {
 
 instance Serialize MemberResult
 
-mkResult :: (RaftLog l v) => Bool -> RaftState l v -> MemberResult
+mkResult :: (RaftLog l v) => Bool -> RaftContext l v -> MemberResult
 mkResult success raft = MemberResult {
     memberActionSuccess = success,
     memberLeader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft,
