@@ -25,6 +25,7 @@ module Control.Consensus.Raft (
 
     module Control.Consensus.Log,
     module Control.Consensus.Raft.Client,
+    module Control.Consensus.Raft.Configuration,
     module Control.Consensus.Raft.Types
 ) where
 
