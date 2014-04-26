@@ -12,16 +12,25 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- Generalized implementation of Raft consensus algorithm.
+--
+-- Application writers generally need only supply implementation of
+-- 'Control.Consensus.Log.Log' and 'Control.Consensus.Log.State', together with 
+-- defining  'Command's.
 --
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft (
-    withConsensus
+    withConsensus,
+
+    module Control.Consensus.Log,
+    module Control.Consensus.Raft.Client,
+    module Control.Consensus.Raft.Types
 ) where
 
 -- local imports
 
+import Control.Consensus.Raft.Client
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Log

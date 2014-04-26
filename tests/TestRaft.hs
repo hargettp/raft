@@ -20,12 +20,10 @@ module TestRaft (
 -- local imports
 
 import Control.Consensus.Raft
-import Control.Consensus.Raft.Client
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Protocol
-import Control.Consensus.Raft.Types
 
 import IntServer
 

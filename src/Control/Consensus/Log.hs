@@ -11,9 +11,9 @@
 -- 
 -- Maintainer  :  phil@haphazardhouse.net
 -- Stability   :  experimental
--- Portability :  non-portable (requires STM)
+-- Portability :  portable
 --
--- General 'Log' typeclass.
+-- General 'Log' and 'State' typeclasses.
 --
 -----------------------------------------------------------------------------
 
@@ -35,13 +35,8 @@ import Prelude hiding (log)
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-{-
-An index is a logical offset into a log.
--}
-type Index = Int
-
-{-
-A log of type @l@ is a sequence of entries of type @e@ such that
+{-|
+A 'Log' of type @l@ is a sequence of entries of type @e@ such that
 entries can be appended to the log starting at a particular 'Index' (and potentially
 overwrite entries previously appended at the same index), fetched
 from a particular 'Index', or committed up to a certain 'Index'. Once committed,
@@ -49,46 +44,50 @@ it is undefined whether attempting to fetch entries with an 'Index' < 'lastCommi
 will succeed or throw an error, as some log implementations may throw away some
 committed entries.
 
-Each entry in the log defines an action that transforms a supplied initial state
-into a new state.  Commiting a log, given some initial state, applies the action contained in
+Each entry in the 'Log' defines an action that transforms a supplied initial 'State'
+into a new 'State'.  Commiting a 'Log', given some initial 'State', applies the action contained in
 each entry in sequence (starting at a specified 'Index') to some state of type @s@,
-producing a new state after committing as many entries as possible.
+producing a new 'State' after committing as many entries as possible.
 
 Each log implementation may choose the monad @m@ in which they operate.  Consumers of logs
 should always use logs in a functional style: that is, after 'appendEntries' or 'commitEntries',
 if the log returned from those functions is not fed into later functions, then results
-may be unexpected.  While the underyling log implementation may itself be pure, log
+may be unexpected.  While the underlying log implementation may itself be pure, log
 methods are wrapped in a monad to support those implementations that may not be--such
 as a log whose entries are read from disk.
+
+Implementing 'commitEntries' is optional, as a default implementation is supplied
+that will invoke 'commitEntry' and 'applyEntry' as needed. Implementations that wish
+to optimize commiting batches of entires may choose to override this method.
 -}
 class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     {-|
-    Create a new `Log`.
+    Create a new 'Log'.
     -}
     mkLog :: m l
     {-|
-    `Index` of last committed entry in the `Log`.
+    'Index' of last committed entry in the 'Log'.
     -}
     lastCommitted :: l -> Index
     {-|
-    `Index` of last appended entry (e.g., the end of the `Log`).
+    'Index' of last appended entry (e.g., the end of the 'Log').
     -}
     lastAppended :: l -> Index
     {-|
-    Append new log entries into the `Log` after truncating the log
-    to remove all entries whose `Index` is greater than or equal
-    to the specified `Index`, although no entries will be overwritten
+    Append new log entries into the 'Log' after truncating the log
+    to remove all entries whose 'Index' is greater than or equal
+    to the specified 'Index', although no entries will be overwritten
     if they are already committed.
     -}
     appendEntries :: l -> Index -> [e] -> m l
     {-|
-    Retrieve a number of entries starting at the specified `Index`
+    Retrieve a number of entries starting at the specified 'Index'
     -}
     fetchEntries :: l -> Index -> Int -> m [e]
     {-|
-    For each uncommitted entry whose `Index` is less than or equal to the
-    specified index, apply the entry to the supplied `State` using `applyEntry`,
-    then mark the entry as committed in the `Log`. Note that implementers are
+    For each uncommitted entry whose 'Index' is less than or equal to the
+    specified index, apply the entry to the supplied 'State' using 'applyEntry',
+    then mark the entry as committed in the 'Log'. Note that implementers are
     free to commit no entries, some entries, or all entries as needed to handle
     errors.  However, the implementation should eventually commit all entries
     if the calling application is well-behaved.
@@ -113,23 +112,31 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
 
     {-|
     Records a single entry in the log as committed; note that
-    this does not involve any external `State` to which the entry
+    this does not involve any external 'State' to which the entry
     must be applied, as that is a separate operation.
     -}
     commitEntry :: l -> Index -> e -> m l
 
 {-
-`Log`s operate on `State`: that is, when committing, the log applies each
-entry to the current `State`, and produces a new `State`. Application of each
-entry operates within a chosen `Monad`, so implementers are free to implement 
-`State` as needed (e.g., use `IO`, `STM`, etc.).
+An 'Index' is a logical offset into a 'Log'.
+
+While the exact interpretation of the 'Index' is up to the 'Log'
+implementation, by convention the first 'Index' in a log is  @0@.
+-}
+type Index = Int
+
+{-
+'Log's operate on 'State': that is, when committing, the log applies each
+entry to the current 'State', and produces a new 'State'. Application of each
+entry operates within a chosen 'Monad', so implementers are free to implement 
+'State' as needed (e.g., use 'IO', 'STM', etc.).
 -}
 class (Monad m) => State s m e where
     applyEntry :: s -> e -> m s
 
 {-|
-Return all entries from the `Log`'s `lastCommitted` time up to and
-including the `lastAppended` time.
+Return all entries from the 'Log''s 'lastCommitted' time up to and
+including the 'lastAppended' time.
 -}
 fetchLatestEntries :: (Monad m, Log l m e s) => l -> m (Index,[e])
 fetchLatestEntries log = do

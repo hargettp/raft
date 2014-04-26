@@ -107,4 +107,10 @@ data Action = AddParticipants [Name]
 
 instance Serialize Action
 
+{-|
+Commands are the specific operations applied to 'Control.Consensus.Log.State's
+to transform them into a new 'Control.Consensus.Log.State'. They are represented
+here in their completely typeless form as a 'B.ByteString', because that's the
+most concrete description of them.
+-}
 type Command = B.ByteString
