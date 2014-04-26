@@ -26,9 +26,6 @@ module Control.Consensus.Raft.Configuration (
     addClusterObservers,
     removeClusterObservers,
     applyConfigurationAction,
-    -- * Actions
-    Action(..),
-    Command    
 ) where
 
 -- local imports
@@ -37,7 +34,6 @@ import Control.Consensus.Raft.Types
 
 -- external imports
 
-import qualified Data.ByteString as B
 import qualified Data.List as L
 import Data.Serialize
 import qualified Data.Set as S
@@ -142,14 +138,3 @@ applyConfigurationAction initial (RemoveParticipants participants) = removeClust
 applyConfigurationAction initial (AddObservers observers) = addClusterObservers initial observers
 applyConfigurationAction initial (RemoveObservers observers) = removeClusterObservers initial observers
 applyConfigurationAction initial _ = initial
-
-type Command = B.ByteString
-
-data Action = AddParticipants [Name]
-    | RemoveParticipants [Name]
-    | AddObservers [Name]
-    | RemoveObservers [Name]
-    | Cmd Command
-    deriving (Eq,Show,Generic)
-
-instance Serialize Action

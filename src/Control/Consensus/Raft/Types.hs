@@ -21,7 +21,10 @@ module Control.Consensus.Raft.Types (
     Timeouts(..),
     defaultTimeouts,
     timeouts,
-    electionTimeout
+    electionTimeout,
+    -- * Actions
+    Action(..),
+    Command
 
 ) where
 
@@ -29,9 +32,12 @@ module Control.Consensus.Raft.Types (
 
 -- external imports
 
+import qualified Data.ByteString as B
 import Data.Serialize
 
 import GHC.Generics
+
+import Network.Endpoints
 
 import qualified System.Random as R
 
@@ -91,3 +97,14 @@ Return a new election timeout
 -}
 electionTimeout :: Timeouts -> IO Timeout
 electionTimeout outs = R.randomRIO $ timeoutElectionRange outs
+
+data Action = AddParticipants [Name]
+    | RemoveParticipants [Name]
+    | AddObservers [Name]
+    | RemoveObservers [Name]
+    | Cmd Command
+    deriving (Eq,Show,Generic)
+
+instance Serialize Action
+
+type Command = B.ByteString
