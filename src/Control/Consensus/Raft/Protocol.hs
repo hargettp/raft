@@ -27,8 +27,10 @@ module Control.Consensus.Raft.Protocol (
     -- * Client call
     goPerformAction,
 
-    -- * Leader calls
+    -- * Leader call
     goAppendEntries,
+
+    -- * Member calls
     goRequestVote,
     onPerformAction,
 

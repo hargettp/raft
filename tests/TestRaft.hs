@@ -60,6 +60,7 @@ tests = [
     testCase "5cluster" test5Cluster,
     testCase "5cluster-stability" test5ClusterStability,
     testCase "client" testClient,
+    testCase "consistency" testConsistency,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
     testCase "clientPerformAction" testClientPerformAction,
@@ -133,6 +134,28 @@ testClient = do
                 assertBool "Client index should be 0" $ clientIndex == 0
             Left _ -> do
                 assertBool "Performing action failed" False
+
+testConsistency :: Assertion
+testConsistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 1
+                                assertBool "Client index should be 0" $ clientIndex == 0
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 1)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
 
 testPerformAction :: Assertion
 testPerformAction = do
@@ -291,6 +314,14 @@ allLeaders vRafts = do
         return $ raftServer raft) vRafts
     let leaders = map (clusterLeader . serverConfiguration . serverState) servers
     return leaders
+
+allStates :: [TVar (RaftContext IntLog IntState)] -> IO [IntState]
+allStates vRafts = do
+    servers <- mapM (\vRaft -> do
+        raft <- atomically $ readTVar vRaft
+        return $ raftServer raft) vRafts
+    let states = map (serverData . serverState) servers
+    return states
 
 withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
 withClient transport name cfg fn = do
