@@ -23,8 +23,6 @@ module Control.Consensus.Raft.Configuration (
     clusterMembersOnly,
     addClusterParticipants,
     removeClusterParticipants,
-    addClusterObservers,
-    removeClusterObservers,
     applyConfigurationAction,
 ) where
 
@@ -57,7 +55,6 @@ in the cluster.
 data Configuration = Configuration {
           configurationLeader :: Maybe Name,
           configurationParticipants :: S.Set Name,
-          configurationObservers :: S.Set Name,
           configurationTimeouts :: Timeouts
           }
           | JointConfiguration {
@@ -71,7 +68,6 @@ newConfiguration :: [Name] -> Configuration
 newConfiguration participants = Configuration {
     configurationLeader = Nothing,
     configurationParticipants = S.fromList participants,
-    configurationObservers = S.empty,
     configurationTimeouts = defaultTimeouts
 }
 
@@ -80,7 +76,7 @@ clusterLeader Configuration {configurationLeader = leaderId} = leaderId
 clusterLeader (JointConfiguration _ configuration) = clusterLeader configuration
 
 clusterMembers :: Configuration -> [Name]
-clusterMembers (Configuration _ participants observers _) = S.toList $ S.union participants observers
+clusterMembers (Configuration _ participants _) = S.toList participants
 clusterMembers (JointConfiguration jointOld jointNew) = S.toList $ S.fromList $ clusterMembers jointOld ++ (clusterMembers jointNew)
 
 clusterMembersOnly :: Configuration -> [Name]
@@ -89,7 +85,7 @@ clusterMembersOnly cfg = case clusterLeader cfg of
     Nothing -> clusterMembers cfg
 
 addClusterParticipants :: Configuration -> [Name] -> Configuration
-addClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
+addClusterParticipants cfg@(Configuration _ _ _) participants = cfg {
     configurationParticipants = S.union (configurationParticipants cfg) $ S.fromList participants
     }
 addClusterParticipants (JointConfiguration jointOld jointNew) participants = JointConfiguration {
@@ -98,30 +94,12 @@ addClusterParticipants (JointConfiguration jointOld jointNew) participants = Joi
     }
 
 removeClusterParticipants :: Configuration -> [Name] -> Configuration
-removeClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
+removeClusterParticipants cfg@(Configuration _ _ _) participants = cfg {
     configurationParticipants = S.difference (configurationParticipants cfg) $ S.fromList participants
     }
 removeClusterParticipants (JointConfiguration jointOld jointNew) participants = JointConfiguration {
     jointOldConfiguration = jointOld,
     jointNewConfiguration = removeClusterParticipants jointNew participants
-    }
-
-addClusterObservers :: Configuration -> [Name] -> Configuration
-addClusterObservers cfg@(Configuration _ _ _ _) observers = cfg {
-    configurationObservers = S.union (configurationObservers cfg) $ S.fromList observers
-    }
-addClusterObservers (JointConfiguration jointOld jointNew) observers = JointConfiguration {
-    jointOldConfiguration = jointOld,
-    jointNewConfiguration = addClusterObservers jointNew observers
-    }
-
-removeClusterObservers :: Configuration -> [Name] -> Configuration
-removeClusterObservers cfg@(Configuration _ _ _ _) observers = cfg {
-    configurationObservers = S.union (configurationObservers cfg) $ S.fromList observers
-    }
-removeClusterObservers (JointConfiguration jointOld jointNew) observers = JointConfiguration {
-    jointOldConfiguration = jointOld,
-    jointNewConfiguration = removeClusterObservers jointNew observers
     }
 
 --------------------------------------------------------------------------------
@@ -135,6 +113,4 @@ leave the configuration unchanged
 applyConfigurationAction :: Configuration -> Action -> Configuration
 applyConfigurationAction initial (AddParticipants participants) = addClusterParticipants initial participants
 applyConfigurationAction initial (RemoveParticipants participants) = removeClusterParticipants initial participants
-applyConfigurationAction initial (AddObservers observers) = addClusterObservers initial observers
-applyConfigurationAction initial (RemoveObservers observers) = removeClusterObservers initial observers
 applyConfigurationAction initial _ = initial
