@@ -24,7 +24,10 @@ module Control.Consensus.Raft.Types (
     electionTimeout,
     -- * Actions
     Action(..),
-    Command
+    Command,
+    -- * Subscriptions
+    Subscription,
+    mkSubscription
 
 ) where
 
@@ -34,6 +37,9 @@ module Control.Consensus.Raft.Types (
 
 import qualified Data.ByteString as B
 import Data.Serialize
+import Data.UUID
+import Data.UUID.V4
+import Data.Word
 
 import GHC.Generics
 
@@ -112,3 +118,11 @@ here in their completely typeless form as a 'B.ByteString', because that's the
 most concrete description of them.
 -}
 type Command = B.ByteString
+
+-- TODO this should be in courier
+type Subscription = (Word32, Word32, Word32, Word32)
+
+mkSubscription :: IO Subscription
+mkSubscription = do
+    ruuid <- nextRandom
+    return $ toWords ruuid

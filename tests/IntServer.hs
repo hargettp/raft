@@ -56,16 +56,9 @@ data IntCommand = Add Int
 
 instance Serialize IntCommand
 
-data IntState = IntState Int deriving (Eq,Show)
+data IntState = IntState Int deriving (Eq,Show,Generic)
 
-{-
-applyAction :: Int -> Command -> Int
-applyAction initial cmd = let Right icmd = decode cmd
-                               in applyIntCommand initial icmd
-applyAction initial action = initial {
-    serverConfiguration = applyConfigurationAction (serverConfiguration initial) action
-    }
--}
+instance Serialize IntState
 
 applyIntCommand :: IntState -> IntCommand -> IO IntState
 applyIntCommand (IntState initial) (Add value) = return $ IntState $ initial + value
