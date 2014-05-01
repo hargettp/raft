@@ -305,7 +305,7 @@ doCommit vRaft endpoint leader members callers vLatest = do
     results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
     infoM _log $ "Synchronized from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
     let newMembers = updateMembers members results
-        newAppendedIndex = membersSafeAppendedIndex newMembers
+        newAppendedIndex = membersSafeAppendedIndex newMembers cfg
         newTerm = membersHighestTerm newMembers
     infoM _log $ "Safe appended index is " ++ (show newAppendedIndex) ++ ": " ++ (show newAppendedIndex)
     if newTerm > (raftCurrentTerm raft)

@@ -21,6 +21,7 @@ module Control.Consensus.Raft.Configuration (
     clusterLeader,
     clusterMembers,
     clusterMembersOnly,
+    clusterParticipants,
     addClusterParticipants,
     removeClusterParticipants,
     applyConfigurationAction,
@@ -55,6 +56,7 @@ in the cluster.
 data Configuration = Configuration {
           configurationLeader :: Maybe Name,
           configurationParticipants :: S.Set Name,
+          configurationObservers :: S.Set Name,
           configurationTimeouts :: Timeouts
           }
           | JointConfiguration {
@@ -68,6 +70,7 @@ newConfiguration :: [Name] -> Configuration
 newConfiguration participants = Configuration {
     configurationLeader = Nothing,
     configurationParticipants = S.fromList participants,
+    configurationObservers = S.empty,
     configurationTimeouts = defaultTimeouts
 }
 
@@ -76,8 +79,14 @@ clusterLeader Configuration {configurationLeader = leaderId} = leaderId
 clusterLeader (JointConfiguration _ configuration) = clusterLeader configuration
 
 clusterMembers :: Configuration -> [Name]
-clusterMembers (Configuration _ participants _) = S.toList participants
-clusterMembers (JointConfiguration jointOld jointNew) = S.toList $ S.fromList $ clusterMembers jointOld ++ (clusterMembers jointNew)
+clusterMembers (Configuration _ participants observers _) = S.toList $ S.union participants observers
+clusterMembers (JointConfiguration jointOld jointNew) =
+    S.toList $ S.union (S.fromList $ clusterMembers jointOld) (S.fromList $ clusterMembers jointNew)
+
+clusterParticipants :: Configuration -> [Name]
+clusterParticipants (Configuration _ participants _ _) = (S.toList participants)
+clusterParticipants (JointConfiguration jointOld jointNew) = 
+    S.toList $ S.fromList $ clusterParticipants jointOld ++ (clusterParticipants jointNew)
 
 clusterMembersOnly :: Configuration -> [Name]
 clusterMembersOnly cfg = case clusterLeader cfg of
@@ -85,7 +94,7 @@ clusterMembersOnly cfg = case clusterLeader cfg of
     Nothing -> clusterMembers cfg
 
 addClusterParticipants :: Configuration -> [Name] -> Configuration
-addClusterParticipants cfg@(Configuration _ _ _) participants = cfg {
+addClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
     configurationParticipants = S.union (configurationParticipants cfg) $ S.fromList participants
     }
 addClusterParticipants (JointConfiguration jointOld jointNew) participants = JointConfiguration {
@@ -94,7 +103,7 @@ addClusterParticipants (JointConfiguration jointOld jointNew) participants = Joi
     }
 
 removeClusterParticipants :: Configuration -> [Name] -> Configuration
-removeClusterParticipants cfg@(Configuration _ _ _) participants = cfg {
+removeClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
     configurationParticipants = S.difference (configurationParticipants cfg) $ S.fromList participants
     }
 removeClusterParticipants (JointConfiguration jointOld jointNew) participants = JointConfiguration {

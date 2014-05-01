@@ -45,6 +45,7 @@ import Control.Consensus.Raft.Types
 
 import qualified Data.List as L
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.Serialize
 
 import GHC.Generics
@@ -106,13 +107,11 @@ type MemberResults =  M.Map Name (Maybe MemberResult)
 updateMembers :: Members -> MemberResults -> Members
 updateMembers members results = M.map applyUpdates members
     where
-        applyUpdates member = 
-            let Just mbr = M.lookup (memberName member) members
-                maybeResult = M.lookup (memberName member) results
-                in case maybeResult of
-                    Nothing -> mbr
-                    Just Nothing -> mbr
-                    Just (Just result) -> updateMember mbr result
+        applyUpdates member =
+            case M.lookup (memberName member) results of
+                Nothing -> member
+                Just Nothing -> member
+                Just (Just result) -> updateMember member result
 
 {-|
 Find the highest log entry `Index` that has already been appended
@@ -121,17 +120,19 @@ last appended log index (irrespective of term), then picking the
 value that is less than or equal to the highest appended
 log entry index on the majority of servers.
 -}
-membersSafeAppendedIndex :: Members -> Index
-membersSafeAppendedIndex members =
-    (membersAppendedIndex members) !! majority
+membersSafeAppendedIndex :: Members -> Configuration -> Index
+membersSafeAppendedIndex members cfg =
+    (membersAppendedIndex members cfg) !! (majority cfg)
     where
-        majority = (M.size members) `quot` 2
+        majority (Configuration _ participants _ _) = (S.size participants) `quot` 2
+        majority (JointConfiguration jointOld jointNew) = min (majority jointOld) (majority jointNew)
 
-membersAppendedIndex :: Members -> [Index]
-membersAppendedIndex members = 
-    map (logIndex . memberLogLastAppended) sortedMembers
+membersAppendedIndex :: Members -> Configuration -> [Index]
+membersAppendedIndex members cfg = 
+    map (logIndex . memberLogLastAppended) sortedParticipants
     where
-        sortedMembers = L.sortBy byAppendedIndex $ M.elems members
+        sortedParticipants = L.sortBy byAppendedIndex $ 
+            filter (\mbr -> elem (memberName mbr) $ clusterParticipants cfg) $ M.elems members
         byAppendedIndex left right =
             let leftIndex = logIndex $ memberLogLastAppended left
                 rightIndex = logIndex $ memberLogLastAppended right
