@@ -244,57 +244,70 @@ lead vRaft endpoint name = do
     let cfg = serverConfiguration $ serverState $ raftServer raft
         members = mkMembers cfg
         term = raftCurrentTerm raft
-    callers <- atomically $ newMailbox
-    vLatest <- atomically $ newEmptyTMVar
+    clients <- atomically $ newMailbox
+    actions <- atomically $ newMailbox
     infoM _log $ "Server " ++ name ++ " leading in term " ++ (show term)
-    raceAll_ $ [doPulse vRaft vLatest,
+    raceAll_ $ [doPulse vRaft actions,
                 doVote vRaft endpoint name True,
                 doFollow vRaft endpoint name True,
-                doServe vRaft endpoint name callers vLatest,
-                doCommit vRaft endpoint name members callers vLatest]
+                doServe vRaft endpoint name actions,
+                doPerform vRaft endpoint name members clients actions]
 
-doPulse :: (RaftLog l v) => TVar (RaftContext l v) -> TMVar Index -> IO ()
-doPulse vRaft vLatest = do
+type Actions = Mailbox (Maybe (Action,Reply MemberResult))
+type Clients = Mailbox (Index,Reply MemberResult)
+
+doPulse :: (RaftLog l v) => TVar (RaftContext l v) -> Actions -> IO ()
+doPulse vRaft actions = do
     cfg <- atomically $ do
         raft <- readTVar vRaft
-        let index = lastAppended $ serverLog $ raftServer raft
-        empty <- isEmptyTMVar vLatest
+        empty <- isEmptyMailbox actions
         if empty
-            then putTMVar vLatest index
+            then writeMailbox actions Nothing
             else return ()
         return $ serverConfiguration $ serverState $ raftServer raft
     threadDelay $ timeoutPulse $ configurationTimeouts cfg
-    doPulse vRaft vLatest
+    doPulse vRaft actions
 
-doServe :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> Mailbox (Index,Reply MemberResult) -> TMVar Index -> IO ()
-doServe vRaft endpoint leader callers vLatest = do
+doServe :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> Actions -> IO ()
+doServe vRaft endpoint leader actions = do
     (atomically $ readTVar vRaft) >>= \raft -> infoM _log $ "Serving from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
     onPerformAction endpoint leader $ \action reply -> do
         infoM _log $ "Leader " ++ leader ++ " received action " ++ (show action)
-        raft <- atomically $ readTVar vRaft
-        let rlog = serverLog $ raftServer raft
-            term = raftCurrentTerm raft
-            nextIndex = (let RaftTime _ i = lastAppendedTime rlog in i) + 1
-        -- TODO this should be changed to append the entries, capture the last appended index,
-        -- and put the client on the pending mailbox, broadcast entries to all members.
-        -- the leader's commit task will commit once enough members have appended.
-        newLog <- appendEntries rlog nextIndex [RaftLogEntry term action]
-        atomically $ do
-            modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
-            writeMailbox callers (lastAppended newLog,reply)
-        infoM _log $ "Appended action at index " ++ (show $ lastAppended newLog)
-    doServe vRaft endpoint leader callers vLatest
+        atomically $ writeMailbox actions $ Just (action,reply)
+    doServe vRaft endpoint leader actions
 
 {-|
 Leaders commit entries to their log, once enough members have appended those entries.
 Once committed, the leader replies to the client who requested the action.
 -}
-doCommit :: (RaftLog l v,Serialize v) => TVar (RaftContext l v) -> Endpoint -> Name -> M.Map Name Member -> Mailbox (Index,Reply MemberResult) -> TMVar Index -> IO ()
-doCommit vRaft endpoint leader members callers vLatest = do
-    raft <- atomically $ do
-        -- interestingly, we don't care about its value at the moment
-        _ <- takeTMVar vLatest
-        readTVar vRaft
+doPerform :: (RaftLog l v,Serialize v) => TVar (RaftContext l v) -> Endpoint -> Name -> M.Map Name Member -> Clients -> Actions -> IO ()
+doPerform vRaft endpoint leader members clients actions = do
+    append vRaft clients actions
+    newMembers <- commit vRaft endpoint leader clients members
+    doPerform vRaft endpoint leader newMembers clients actions
+
+append :: (RaftLog l v) => TVar (RaftContext l v) -> Clients -> Actions -> IO ()
+append vRaft callers actions = do
+    (raft,maybeAction) <- atomically $ do
+        maybeAction <- readMailbox actions
+        raft <- readTVar vRaft
+        return (raft,maybeAction)
+    case maybeAction of
+        Nothing -> return ()
+        Just (action,reply) -> do
+            let oldLog = serverLog $ raftServer raft
+                term = raftCurrentTerm raft
+                nextIndex = (let RaftTime _ i = lastAppendedTime oldLog in i) + 1
+            newLog <- appendEntries oldLog nextIndex [RaftLogEntry term action]
+            atomically $ do
+                modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
+                writeMailbox callers (lastAppended newLog,reply)
+            infoM _log $ "Appended action at index " ++ (show $ lastAppended newLog)
+            return ()
+
+commit :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> Clients -> Members -> IO Members
+commit vRaft endpoint leader clients members = do
+    raft <- atomically $ readTVar vRaft
     let rlog = serverLog $ raftServer raft
         cs = newCallSite endpoint leader
         term = raftCurrentTerm raft
@@ -323,29 +336,32 @@ doCommit vRaft endpoint leader members callers vLatest = do
                                             infoM _log $ "Committing at time " ++ (show time)
                                             commitEntries rlog newAppendedIndex (serverState $ raftServer $ raft)
                                         else return (rlog,(serverState $ raftServer $ raft))
-            -- update clients
-            maybeReply <- atomically $ do
-                modifyTVar vRaft $ \oldRaft ->
-                    setRaftLog newLog $ setRaftState newState oldRaft
-                maybeClient <- tryPeekMailbox callers
-                case maybeClient of
-                    Nothing -> return Nothing
-                    Just (index,reply) ->
-                        if index <= (lastCommitted newLog)
-                            then do
-                                updatedRaft <- readTVar vRaft
-                                _ <- readMailbox callers
-                                return $ Just (index, reply $ mkResult True updatedRaft)
-                            else return Nothing
-            case maybeReply of
-                Nothing -> do
-                    infoM _log $ "No client at index " ++ (show $ lastCommitted newLog)
-                    return ()
-                Just (index,reply) -> do
-                    infoM _log $ "Replying at index " ++ (show index)
-                    reply
-                    infoM _log $ "Replied at index " ++ (show index)
-            doCommit vRaft endpoint leader newMembers callers vLatest
+            notifyClients vRaft clients newLog newState
+    return newMembers
+
+notifyClients :: (RaftLog l v) => TVar (RaftContext l v) -> Clients -> l -> RaftState v -> IO ()
+notifyClients vRaft clients newLog newState = do
+    maybeReply <- atomically $ do
+        modifyTVar vRaft $ \oldRaft ->
+            setRaftLog newLog $ setRaftState newState oldRaft
+        maybeClient <- tryPeekMailbox clients
+        case maybeClient of
+            Nothing -> return Nothing
+            Just (index,reply) ->
+                if index <= (lastCommitted newLog)
+                    then do
+                        updatedRaft <- readTVar vRaft
+                        _ <- readMailbox clients
+                        return $ Just (index, reply $ mkResult True updatedRaft)
+                    else return Nothing
+    case maybeReply of
+        Nothing -> do
+            infoM _log $ "No client at index " ++ (show $ lastCommitted newLog)
+            return ()
+        Just (index,reply) -> do
+            infoM _log $ "Replying at index " ++ (show index)
+            reply
+            infoM _log $ "Replied at index " ++ (show index)
 
 doRedirect :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> IO ()
 doRedirect vRaft endpoint member = do
