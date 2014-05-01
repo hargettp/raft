@@ -46,7 +46,6 @@ import Control.Consensus.Raft.Types
 import Control.Concurrent.STM
 
 import Data.Serialize
-import qualified Data.Map as M
 import qualified Data.Set as S
 
 import GHC.Generics
@@ -80,8 +79,7 @@ mkRaft server = newTVar $ RaftContext {
         raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
         raftServer = server,
-        raftConfigurationObservers = S.empty,
-        raftDataObservers = M.empty
+        raftConfigurationObservers = S.empty
     }
 
 {-|
@@ -103,8 +101,7 @@ data RaftContext l v = (RaftLog l v) => RaftContext {
     raftCurrentTerm :: Term,
     raftLastCandidate :: Maybe Name,
     raftServer :: RaftServer l v,
-    raftConfigurationObservers :: S.Set Name,
-    raftDataObservers :: M.Map Subscription Name
+    raftConfigurationObservers :: S.Set Name
 }
 
 {-|

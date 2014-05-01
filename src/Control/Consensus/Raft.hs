@@ -99,9 +99,7 @@ follow vRaft endpoint name = do
     infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
     raceAll_ [doFollow vRaft endpoint name False,
                 doVote vRaft endpoint name False,
-                doRedirect vRaft endpoint name,
-                doObserve vRaft endpoint,
-                doUnobserve vRaft endpoint name]
+                doRedirect vRaft endpoint name]
 
 {-|
     Wait for 'AppendEntries' requests and process them, commit new changes
@@ -150,13 +148,9 @@ doFollow vRaft endpoint name leading = do
                 then do
                     raft <- atomically $ readTVar vRaft
                     (log,state) <- commitEntries (serverLog $ raftServer $ raft) (logIndex $ committed) (serverState $ raftServer $ raft)
-                    index <- atomically $ do
+                    atomically $ do
                         modifyTVar vRaft $ \oldRaft ->
                                 setRaftLog log $ setRaftState state oldRaft
-                        return $ lastCommitted log
-                    -- notify observers
-                    let observers = raftDataObservers raft
-                    goNotifyObservers endpoint name observers index $ serverData state
                 else return ()
             if leading && (name /= leader)
                 then return ()
@@ -257,9 +251,7 @@ lead vRaft endpoint name = do
                 doVote vRaft endpoint name True,
                 doFollow vRaft endpoint name True,
                 doServe vRaft endpoint name callers vLatest,
-                doCommit vRaft endpoint name members callers vLatest,
-                doObserve vRaft endpoint,
-                doUnobserve vRaft endpoint name]
+                doCommit vRaft endpoint name members callers vLatest]
 
 doPulse :: (RaftLog l v) => TVar (RaftContext l v) -> TMVar Index -> IO ()
 doPulse vRaft vLatest = do
@@ -353,10 +345,6 @@ doCommit vRaft endpoint leader members callers vLatest = do
                     infoM _log $ "Replying at index " ++ (show index)
                     reply
                     infoM _log $ "Replied at index " ++ (show index)
-            -- notify observers
-            let observers = raftDataObservers raft
-                index = lastCommitted newLog
-            goNotifyObservers endpoint leader observers index $ serverData newState
             doCommit vRaft endpoint leader newMembers callers vLatest
 
 doRedirect :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> IO ()
@@ -370,23 +358,6 @@ doRedirect vRaft endpoint member = do
         raft <- atomically $ readTVar vRaft
         reply $ mkResult False raft
     doRedirect vRaft endpoint member
-
-doObserve :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> IO ()
-doObserve vRaft endpoint = do
-    onObserveData endpoint $ \sub observer -> do
-        atomically $ do
-            modifyTVar vRaft $ \oldRaft ->
-                oldRaft {raftDataObservers = M.insert sub observer (raftDataObservers oldRaft)}
-        return ()
-    doObserve vRaft endpoint
-
-doUnobserve :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> IO ()
-doUnobserve vRaft endpoint member = do
-    onUnobserveData endpoint $ \sub -> do
-        atomically $ do
-            modifyTVar vRaft $ \oldRaft ->
-                oldRaft {raftDataObservers = M.delete sub (raftDataObservers oldRaft)}
-    doUnobserve vRaft endpoint member
 
 raceAll_ :: [IO ()] -> IO ()
 raceAll_ actions = do

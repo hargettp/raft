@@ -24,13 +24,8 @@ module Control.Consensus.Raft.Protocol (
 
     RequestVote(..),
 
-    UnobserveData(..),
-
     -- * Client call
     goPerformAction,
-    goObserveData,
-    goUnobserveData,
-    goNotifyObservers,
 
     -- * Leader call
     goAppendEntries,
@@ -41,15 +36,12 @@ module Control.Consensus.Raft.Protocol (
     -- * Member handlers
     onPerformAction,
     onAppendEntries,
-    onRequestVote,
-    onObserveData,
-    onUnobserveData
+    onRequestVote
 
 ) where
 
 -- local imports
 
-import Control.Consensus.Log
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
@@ -190,52 +182,3 @@ onPerformAction endpoint member fn = do
     let Right action = decode bytes
     fn action (\response -> reply $ encode response)
     return ()
-
-methodObserveData :: String
-methodObserveData = "observeData"
-
-goObserveData :: Endpoint -> Name -> Name -> IO ()
-goObserveData endpoint member observer = do
-    sub <- mkSubscription
-    sendMessage_ endpoint member $ encode 
-        $ Request sub observer methodObserveData $ encode ()
-    return ()
-
-onObserveData :: Endpoint -> (Subscription -> Name -> IO ()) -> IO ()
-onObserveData endpoint fn = do
-    (observer,subscription) <- selectMessage endpoint $ \msg -> do
-                case decode msg of
-                    Left _ -> Nothing
-                    Right (Request rid caller rmethod _) -> do
-                        if rmethod == methodObserveData
-                            then Just (caller,rid)
-                            else Nothing
-    fn subscription observer
-    return ()
-
-methodUnobserveData :: String
-methodUnobserveData = "unobserveData"
-
-goUnobserveData :: Endpoint -> Name -> Subscription -> Name -> IO ()
-goUnobserveData endpoint member sub observer = do
-    sendMessage_ endpoint member $ encode
-        $ Request sub observer methodUnobserveData $ encode ()
-    return ()
-
-onUnobserveData :: Endpoint -> (Subscription -> IO ()) -> IO ()
-onUnobserveData endpoint fn = do
-    subscription <- selectMessage endpoint $ \msg -> do
-                case decode msg of
-                    Left _ -> Nothing
-                    Right (Request rid _ rmethod _) -> do
-                        if rmethod == methodUnobserveData
-                            then Just rid
-                            else Nothing
-    fn subscription
-    return ()
-
-goNotifyObservers :: (Serialize v) => Endpoint -> Name -> M.Map Subscription Name -> Index -> v -> IO ()
-goNotifyObservers endpoint member observers index value = do
-    mapM_ (\(sub,observer)-> 
-            sendMessage_ endpoint observer
-            $ encode $ Response sub member $ encode (index,value)) (M.assocs observers)
