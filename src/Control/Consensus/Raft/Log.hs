@@ -74,10 +74,11 @@ class (Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
 
 type Raft l v = TVar (RaftContext l v)
 
-mkRaft :: (RaftLog l v) => RaftServer l v -> STM (Raft l v)
-mkRaft server = newTVar $ RaftContext {
+mkRaft :: (RaftLog l v) => Endpoint -> RaftServer l v -> STM (Raft l v)
+mkRaft endpoint server = newTVar $ RaftContext {
         raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
+        raftEndpoint = endpoint,
         raftServer = server,
         raftConfigurationObservers = S.empty
     }
@@ -100,6 +101,7 @@ specific application.
 data RaftContext l v = (RaftLog l v) => RaftContext {
     raftCurrentTerm :: Term,
     raftLastCandidate :: Maybe Name,
+    raftEndpoint :: Endpoint,
     raftServer :: RaftServer l v,
     raftConfigurationObservers :: S.Set Name
 }
