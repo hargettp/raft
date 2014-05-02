@@ -57,6 +57,8 @@ import Prelude hiding (log)
 
 import System.Log.Logger
 
+import Text.Printf
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -74,13 +76,13 @@ withConsensus endpoint server fn = do
         (\_ -> fn vRaft)
     where
         run vRaft = do
-            infoM _log $ "Starting server " ++ (serverName server)
+            infoM _log $ printf "Starting server %v" $ serverName server
             finally (catch (participate vRaft)
                         (\e -> case e of
                                 ThreadKilled -> return ()
-                                _ -> debugM _log $ (show $ serverName server) ++ " encountered error: " ++ (show (e :: AsyncException))))
+                                _ -> debugM _log $ printf "%v encountered error: %v" (serverName server) (show (e :: AsyncException))))
                 (do
-                    infoM _log $ "Stopped server " ++ (serverName server) )
+                    infoM _log $ printf "Stopped server %v" $ serverName server )
         participate vRaft = do
             follow vRaft endpoint $ serverName server
             won <- volunteer vRaft endpoint $ serverName server
@@ -96,7 +98,7 @@ follow vRaft endpoint name = do
         modifyTVar vRaft $ \oldRaft -> setRaftLeader Nothing oldRaft
         raft <- readTVar vRaft
         return $ raftCurrentTerm raft
-    infoM _log $ "Server " ++ name ++ " following " ++ " in term " ++ (show term)
+    infoM _log $ printf "Server %v following in term %v" name term
     raceAll_ [doFollow vRaft endpoint name False,
                 doVote vRaft endpoint name False,
                 doRedirect vRaft endpoint name]
@@ -113,8 +115,8 @@ doFollow vRaft endpoint name leading = do
         raft <- readTVar vRaft
         return $ serverConfiguration $ serverState $ raftServer raft
     maybeCommitted <- onAppendEntries endpoint cfg name $ \req -> do
-        debugM _log $ "Server " ++ name ++ " received " ++ (show req)
-        infoM _log $ "Server " ++ name ++ " received pulse from " ++ (aeLeader req)
+        debugM _log $ printf "Server %v received %v" name (show req)
+        infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
         (valid, raft) <- atomically $ do
             raft <-readTVar vRaft
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
@@ -164,7 +166,7 @@ Wait for request vote requests and process them
 doVote :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> Bool -> IO ()
 doVote vRaft endpoint name leading = do
     won <- onRequestVote endpoint name $ \req -> do
-        debugM _log $ "Server " ++ name ++ " received vote request from " ++ (show $ rvCandidate req)
+        debugM _log $ printf "Server %v received vote request from %v" name (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
             raft <- readTVar vRaft
             let log = serverLog $ raftServer raft
@@ -189,8 +191,7 @@ doVote vRaft endpoint name leading = do
                                                 setRaftLastCandidate (Just $ rvCandidate req) oldRaft
                                             return (raft,True,"Candidate log more up to date")
                                         else return (raft,False,"Candidate log out of date")
-        infoM _log $ "Server " ++ name ++ " vote for " ++ rvCandidate req ++ " is "
-            ++ (show (raftCurrentTerm raft,vote)) ++ " because " ++ reason
+        infoM _log $ printf "Server %v vote for %v is %v because %v" name (rvCandidate req) (show (raftCurrentTerm raft,vote)) reason
         return $ mkResult vote raft
     if leading && won
         then return ()
@@ -213,16 +214,16 @@ doVolunteer vRaft endpoint candidate = do
             setRaftTerm ((raftCurrentTerm oldRaft) + 1)
                 $ setRaftLastCandidate Nothing oldRaft
         readTVar vRaft
-    infoM _log $ "Server " ++ candidate ++ " volunteering in term " ++ (show $ raftCurrentTerm raft)
+    infoM _log $ printf "Server %v volunteering in term %v" candidate (show $ raftCurrentTerm raft)
     let cfg = serverConfiguration $ serverState $ raftServer raft
         members = clusterMembers cfg
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
         log = serverLog $ raftServer raft
         RaftTime lastTerm lastIndex = lastAppendedTime log
-    debugM _log $ "Server " ++ candidate ++ " is soliciting votes from " ++ (show members)
+    debugM _log $ printf "Server %v is soliciting votes from %v" candidate (show members)
     votes <- goRequestVote cs cfg term candidate (RaftTime lastTerm lastIndex)
-    debugM _log $ "Server " ++ candidate ++ " (" ++ (show (term,lastIndex)) ++ ") received votes " ++ (show votes)
+    debugM _log $ printf "Server %v (%v) received votes %v" candidate (show (term,lastIndex)) (show votes)
     return $ wonElection votes
     where
         wonElection :: M.Map Name (Maybe MemberResult) -> Bool
@@ -246,7 +247,7 @@ lead vRaft endpoint name = do
         term = raftCurrentTerm raft
     clients <- atomically $ newMailbox
     actions <- atomically $ newMailbox
-    infoM _log $ "Server " ++ name ++ " leading in term " ++ (show term)
+    infoM _log $ printf "Server %v leading in term %v" name (show term)
     raceAll_ $ [doPulse vRaft actions,
                 doVote vRaft endpoint name True,
                 doFollow vRaft endpoint name True,
@@ -270,9 +271,9 @@ doPulse vRaft actions = do
 
 doServe :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> Actions -> IO ()
 doServe vRaft endpoint leader actions = do
-    (atomically $ readTVar vRaft) >>= \raft -> infoM _log $ "Serving from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
+    (atomically $ readTVar vRaft) >>= \raft -> infoM _log $ printf "Serving from %v in term %v "leader (show $ raftCurrentTerm raft)
     onPerformAction endpoint leader $ \action reply -> do
-        infoM _log $ "Leader " ++ leader ++ " received action " ++ (show action)
+        infoM _log $ printf "Leader %v received action %v" leader (show action)
         atomically $ writeMailbox actions $ Just (action,reply)
     doServe vRaft endpoint leader actions
 
@@ -302,7 +303,7 @@ append vRaft callers actions = do
             atomically $ do
                 modifyTVar vRaft $ \oldRaft -> setRaftLog newLog oldRaft
                 writeMailbox callers (lastAppended newLog,reply)
-            infoM _log $ "Appended action at index " ++ (show $ lastAppended newLog)
+            infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()
 
 commit :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> Clients -> Members -> IO Members
@@ -314,16 +315,16 @@ commit vRaft endpoint leader clients members = do
         prevTime = lastCommittedTime rlog
         cfg = serverConfiguration $ serverState $ raftServer raft
     (commitIndex,entries) <- fetchLatestEntries rlog
-    infoM _log $ "Synchronizing from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft) ++ ": " ++ (show entries)
+    infoM _log $ printf "Synchronizing from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
-    infoM _log $ "Synchronized from " ++ leader ++ " in term " ++ (show $ raftCurrentTerm raft)
+    infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     let newMembers = updateMembers members results
         newAppendedIndex = membersSafeAppendedIndex newMembers cfg
         newTerm = membersHighestTerm newMembers
-    infoM _log $ "Safe appended index is " ++ (show newAppendedIndex) ++ ": " ++ (show newAppendedIndex)
+    infoM _log $ printf "Safe appended index is %v" (show newAppendedIndex)
     if newTerm > (raftCurrentTerm raft)
         then do
-            infoM _log $ "Leading stepping down; new term " ++ (show newTerm) ++ " discovered"
+            infoM _log $ printf "Leader stepping down; new term %v discovered" (show newTerm)
             atomically $ modifyTVar vRaft $ \oldRaft ->
                 setRaftTerm newTerm oldRaft
             return ()
@@ -333,7 +334,7 @@ commit vRaft endpoint leader clients members = do
                                      count = newAppendedIndex - oldCommitedIndex
                                      in if count > 0
                                         then do
-                                            infoM _log $ "Committing at time " ++ (show time)
+                                            infoM _log $ printf "Committing at time %v" (show time)
                                             commitEntries rlog newAppendedIndex (serverState $ raftServer $ raft)
                                         else return (rlog,(serverState $ raftServer $ raft))
             notifyClients vRaft clients newLog newState
@@ -356,21 +357,21 @@ notifyClients vRaft clients newLog newState = do
                     else return Nothing
     case maybeReply of
         Nothing -> do
-            infoM _log $ "No client at index " ++ (show $ lastCommitted newLog)
+            infoM _log $ printf "No client at index %v" (show $ lastCommitted newLog)
             return ()
         Just (index,reply) -> do
-            infoM _log $ "Replying at index " ++ (show index)
+            infoM _log $ printf "Replying at index %v" (show index)
             reply
-            infoM _log $ "Replied at index " ++ (show index)
+            infoM _log $ printf "Replied at index %v" (show index)
 
 doRedirect :: (RaftLog l v) => TVar (RaftContext l v) -> Endpoint -> Name -> IO ()
 doRedirect vRaft endpoint member = do
     term <- atomically $ do
         raft <- readTVar vRaft
         return $ raftCurrentTerm raft
-    infoM _log $ "Redirecting from " ++ member ++ " in " ++ (show term)
+    infoM _log $ printf "Redirecting from %v in %v" member (show term)
     onPerformAction endpoint member $ \action reply -> do
-        infoM _log $ "Member " ++ member ++ " received action " ++ (show action)
+        infoM _log $ printf "Member %v received action %v" member (show action)
         raft <- atomically $ readTVar vRaft
         reply $ mkResult False raft
     doRedirect vRaft endpoint member
