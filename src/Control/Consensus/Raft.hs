@@ -133,7 +133,7 @@ doFollow vRaft leading = do
                     let log = serverLog $ raftServer raft
                     -- check previous entry for consistency
                     return ( (lastAppendedTime log) == (aePreviousTime req),raft)
-        if valid || not leading
+        if valid && not leading
             then do
                 let log = serverLog $ raftServer raft
                     index = (1 + (logIndex $ aePreviousTime req))
@@ -158,6 +158,7 @@ doFollow vRaft leading = do
                                 setRaftLog log $ setRaftState state oldRaft
                 else return ()
             if leading && (name /= leader)
+                -- someone else is sending append entries, so step down
                 then return ()
                 else doFollow vRaft leading
         -- we heard no message before timeout
@@ -171,7 +172,7 @@ doVote vRaft leading = do
     initialRaft <- atomically $ readTVar vRaft
     let endpoint = raftEndpoint initialRaft
         name = serverName $ raftServer initialRaft
-    won <- onRequestVote endpoint name $ \req -> do
+    votedForCandidate <- onRequestVote endpoint name $ \req -> do
         debugM _log $ printf "Server %v received vote request from %v" name (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
             raft <- readTVar vRaft
@@ -199,7 +200,7 @@ doVote vRaft leading = do
                                         else return (raft,False,"Candidate log out of date")
         infoM _log $ printf "Server %v vote for %v is %v because %v" name (rvCandidate req) (show (raftCurrentTerm raft,vote)) reason
         return $ mkResult vote raft
-    if leading && won
+    if leading && votedForCandidate
         then return ()
         else doVote vRaft leading
 
