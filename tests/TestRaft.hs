@@ -47,6 +47,8 @@ import Test.Framework
 import Test.HUnit
 import Test.Framework.Providers.HUnit
 
+import Text.Printf
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -61,6 +63,8 @@ tests = [
     testCase "5cluster-stability" test5ClusterStability,
     testCase "client" testClient,
     testCase "consistency" testConsistency,
+    testCase "2consistency" test2Consistency,
+    testCase "3consistency" test3Consistency,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
     testCase "clientPerformAction" testClientPerformAction,
@@ -148,11 +152,58 @@ testConsistency = do
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 1
-                                assertBool "Client index should be 0" $ clientIndex == 0
+                                assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
                                 assertBool "" $ all (== (IntState 1)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
+
+test2Consistency :: Assertion
+test2Consistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Multiply 5
+                                assertBool  (printf "Client index should be 1: %v" (show clientIndex)) $ clientIndex == 1
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 15)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
+
+test3Consistency :: Assertion
+test3Consistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Subtract 2
+                                assertBool  (printf "Client index should be 2: %v" (show clientIndex)) $ clientIndex == 2
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 13)) states)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False

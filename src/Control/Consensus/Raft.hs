@@ -237,7 +237,7 @@ doVolunteer vRaft = do
         wonElection :: M.Map Name (Maybe MemberResult) -> Bool
         wonElection votes = majority votes $ M.foldl (\tally ballot -> 
             case ballot of
-                Just (result) -> if (memberActionSuccess result) then tally + 1 else tally 
+                Just (result) -> if (memberActionSuccess result) then tally + 1 else tally
                 _ -> tally) 0 votes
         majority :: M.Map Name (Maybe MemberResult) -> Int -> Bool
         majority votes tally = tally > ((M.size $ votes) `quot` 2)
@@ -262,7 +262,7 @@ lead vRaft = do
                 doVote vRaft True,
                 doFollow vRaft True,
                 doServe vRaft actions,
-                doPerform vRaft members clients actions]
+                doPerform vRaft members actions clients]
 
 type Actions = Mailbox (Maybe (Action,Reply MemberResult))
 type Clients = Mailbox (Index,Reply MemberResult)
@@ -295,14 +295,14 @@ doServe vRaft actions = do
 Leaders commit entries to their log, once enough members have appended those entries.
 Once committed, the leader replies to the client who requested the action.
 -}
-doPerform :: (RaftLog l v) => Raft l v -> M.Map Name Member -> Clients -> Actions -> IO ()
-doPerform vRaft members clients actions = do
-    append vRaft clients actions
+doPerform :: (RaftLog l v) => Raft l v -> M.Map Name Member -> Actions -> Clients -> IO ()
+doPerform vRaft members actions clients = do
+    append vRaft actions clients
     newMembers <- commit vRaft clients members
-    doPerform vRaft newMembers clients actions
+    doPerform vRaft newMembers actions clients
 
-append :: (RaftLog l v) => Raft l v -> Clients -> Actions -> IO ()
-append vRaft callers actions = do
+append :: (RaftLog l v) => Raft l v -> Actions -> Clients -> IO ()
+append vRaft actions clients = do
     (raft,maybeAction) <- atomically $ do
         maybeAction <- readMailbox actions
         raft <- readTVar (raftContext vRaft)
@@ -316,7 +316,7 @@ append vRaft callers actions = do
             newLog <- appendEntries oldLog nextIndex [RaftLogEntry term action]
             atomically $ do
                 modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
-                writeMailbox callers (lastAppended newLog,reply)
+                writeMailbox clients (lastAppended newLog,reply)
             infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()
 
