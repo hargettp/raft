@@ -264,10 +264,10 @@ testWithClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
-checkForConsistency :: Integer -> Maybe Name -> [TVar (RaftContext IntLog IntState)] -> IO (Maybe Name)
+checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntState] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
     let leaders = map (clusterLeader . serverConfiguration . serverState) servers
         results = map (serverData . serverState)  servers
@@ -284,10 +284,10 @@ checkForConsistency run possibleLeader vRafts = do
                         then return leader
                         else return Nothing
 
-waitForLeader :: Integer -> Integer -> [TVar (RaftContext IntLog IntState)] -> IO (Maybe Name)
+waitForLeader :: Integer -> Integer -> [Raft IntLog IntState] -> IO (Maybe Name)
 waitForLeader maxCount attempt vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
     let leaders = map (clusterLeader . serverConfiguration . serverState) servers
         leader = leaders !! 0
@@ -307,18 +307,18 @@ waitForLeader maxCount attempt vRafts = do
                 else
                     waitForLeader (maxCount - 1) (attempt + 1) vRafts
 
-allLeaders :: [TVar (RaftContext IntLog IntState)] -> IO [Maybe Name]
+allLeaders :: [Raft IntLog IntState] -> IO [Maybe Name]
 allLeaders vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
     let leaders = map (clusterLeader . serverConfiguration . serverState) servers
     return leaders
 
-allStates :: [TVar (RaftContext IntLog IntState)] -> IO [IntState]
+allStates :: [Raft IntLog IntState] -> IO [IntState]
 allStates vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
     let states = map (serverData . serverState) servers
     return states

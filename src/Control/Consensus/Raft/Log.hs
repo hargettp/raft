@@ -19,7 +19,7 @@
 
 module Control.Consensus.Raft.Log (
     -- * Raft state
-    Raft,
+    Raft(..),
     mkRaft,
     RaftContext(..),
     RaftServer(..),
@@ -68,25 +68,27 @@ instance Serialize RaftTime
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
+class (Serialize v,Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
     lastAppendedTime :: l -> RaftTime
     lastCommittedTime :: l -> RaftTime
 
-type Raft l v = TVar (RaftContext l v)
+data Raft l v = (RaftLog l v,Serialize v) => Raft {raftContext :: TVar (RaftContext l v)}
 
 mkRaft :: (RaftLog l v) => Endpoint -> RaftServer l v -> STM (Raft l v)
-mkRaft endpoint server = newTVar $ RaftContext {
+mkRaft endpoint server = do
+    ctx <- newTVar $ RaftContext {
         raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
         raftEndpoint = endpoint,
         raftServer = server,
         raftConfigurationObservers = S.empty
     }
+    return $ Raft ctx
 
 {-|
 A minimal 'Server' capable of participating in the Raft algorithm.
 -}
-data RaftServer l v = (Log l IO RaftLogEntry (RaftState v)) => RaftServer {
+data RaftServer l v = (RaftLog l v) => RaftServer {
     serverName :: Name,
     serverLog :: l,
     serverState :: RaftState v

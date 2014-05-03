@@ -83,9 +83,6 @@ data RequestVote = RequestVote {
 
 instance Serialize RequestVote
 
-data UnobserveData = UnobserveData Subscription Name deriving (Eq,Show,Generic)
-instance Serialize UnobserveData
-
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
