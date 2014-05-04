@@ -58,7 +58,10 @@ _log = "test.raft"
 tests :: [Test.Framework.Test]
 tests = [
     testCase "3cluster" test3Cluster,
+    testCase "3cluster-1nonparticipant" test3Cluster1NonParticipant,
+    testCase "3cluster-add1" test3ClusterAdd1,
     testCase "3cluster-stability" test3ClusterStability,
+    testCase "3cluster-1nonparticipant-stability" test3Cluster1NonParticipantStability,
     testCase "5cluster" test5Cluster,
     testCase "5cluster-stability" test5ClusterStability,
     testCase "client" testClient,
@@ -88,6 +91,39 @@ test3Cluster = do
         _ <- checkForConsistency (1 :: Integer) leader vRafts
         return ()
 
+test3Cluster1NonParticipant :: Assertion
+test3Cluster1NonParticipant = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers1NonParticipant transport cfg "server4" $ \vRafts -> do
+        let mRafts = take 3 vRafts
+        leader <- waitForLeader 5 (1 :: Integer) mRafts
+        leaders <- allLeaders mRafts
+        infoM _log $ "Leaders are " ++ (show leaders)
+        _ <- checkForConsistency (1 :: Integer) leader mRafts
+        return ()
+
+test3ClusterAdd1 :: Assertion
+test3ClusterAdd1 = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers1NonParticipant transport cfg "server4" $ \vRafts -> do
+        let mRafts = take 3 vRafts
+        leader <- waitForLeader 5 (1 :: Integer) mRafts
+        leaders <- allLeaders mRafts
+        infoM _log $ "Leaders are " ++ (show leaders)
+        _ <- checkForConsistency (1 :: Integer) leader mRafts
+        withClient transport "client1" cfg $ \client -> do
+            RaftTime _ clientIndex <- performAction client $ AddParticipants ["server4"]
+            assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
+            pause
+            newLeaders <- allLeaders vRafts
+            infoM _log $ printf "New leaders are %v" (show newLeaders)
+            newLastCommitted <- allLastCommitted vRafts
+            infoM _log $ printf "Last committed indexes are %v" (show newLastCommitted)
+            _ <- checkForConsistency (1 :: Integer) leader vRafts
+            return ()
+
 test3ClusterStability :: Assertion
 test3ClusterStability = do
     transport <- newMemoryTransport
@@ -97,6 +133,18 @@ test3ClusterStability = do
         _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         pause >> pause
         _ <- checkForConsistency (2 :: Integer) firstLeader vRafts
+        return ()
+
+test3Cluster1NonParticipantStability :: Assertion
+test3Cluster1NonParticipantStability = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers1NonParticipant  transport cfg "server4" $ \vRafts -> do
+        let mRafts = take 3 vRafts
+        firstLeader <- waitForLeader 5 (1 :: Integer) mRafts
+        _ <- checkForConsistency (1 :: Integer) firstLeader mRafts
+        pause >> pause
+        _ <- checkForConsistency (2 :: Integer) firstLeader mRafts
         return ()
 
 test5Cluster :: Assertion
@@ -374,6 +422,14 @@ allStates vRafts = do
     let states = map (serverData . serverState) servers
     return states
 
+allLastCommitted :: [Raft IntLog IntState] -> IO [Index]
+allLastCommitted vRafts = do
+    servers <- mapM (\vRaft -> do
+        raft <- atomically $ readTVar $ raftContext vRaft
+        return $ raftServer raft) vRafts
+    let committed = map (lastCommitted . serverLog) servers
+    return committed
+
 withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
 withClient transport name cfg fn = do
     endpoint <- newEndpoint [transport]
@@ -414,7 +470,15 @@ with3Servers transport cfg fn =
     let names = clusterMembers cfg
     in withServer transport cfg (names !! 0) $ \vRaft1 ->
         withServer transport cfg (names !! 1) $ \vRaft2 ->
-        withServer transport cfg (names !! 2) $ \vRaft3 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3]
+        withServer transport cfg (names !! 2) $ \vRaft3 -> fn $ [vRaft1,vRaft2,vRaft3]
+
+with3Servers1NonParticipant :: Transport -> Configuration -> Name -> ([IntRaft] -> IO ()) -> IO ()
+with3Servers1NonParticipant transport cfg name fn = 
+    let names = clusterMembers cfg
+    in withServer transport cfg (names !! 0) $ \vRaft1 ->
+        withServer transport cfg (names !! 1) $ \vRaft2 ->
+        withServer transport cfg (names !! 2) $ \vRaft3 -> 
+        withServer transport cfg name $ \vRaft4 -> fn $ [vRaft1, vRaft2, vRaft3, vRaft4]
 
 with5Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
 with5Servers transport cfg fn = 

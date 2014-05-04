@@ -18,7 +18,9 @@ module Control.Consensus.Raft.Configuration (
     -- * Configuration
     Configuration(..),
     newConfiguration,
+    isJointConfiguration,
     clusterLeader,
+    isClusterParticipant,
     clusterMembers,
     clusterMembersOnly,
     clusterParticipants,
@@ -74,9 +76,18 @@ newConfiguration participants = Configuration {
     configurationTimeouts = defaultTimeouts
 }
 
+isJointConfiguration :: Configuration -> Bool
+isJointConfiguration (Configuration _ _ _ _) = False
+isJointConfiguration (JointConfiguration _ _) = True
+
 clusterLeader :: Configuration -> Maybe Name
 clusterLeader Configuration {configurationLeader = leaderId} = leaderId
 clusterLeader (JointConfiguration _ configuration) = clusterLeader configuration
+
+isClusterParticipant :: Name -> Configuration -> Bool
+isClusterParticipant name (Configuration _ participants _ _) = S.member name participants
+isClusterParticipant name (JointConfiguration jointOld jointNew) = 
+    (isClusterParticipant name jointOld) || (isClusterParticipant name jointNew)
 
 clusterMembers :: Configuration -> [Name]
 clusterMembers (Configuration _ participants observers _) = S.toList $ S.union participants observers
@@ -111,6 +122,12 @@ removeClusterParticipants (JointConfiguration jointOld jointNew) participants = 
     jointNewConfiguration = removeClusterParticipants jointNew participants
     }
 
+setClusterParticipants :: Configuration -> [Name] -> Configuration
+setClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
+    configurationParticipants = S.fromList participants
+    }
+setClusterParticipants (JointConfiguration _ jointNew) participants = setClusterParticipants jointNew participants
+
 --------------------------------------------------------------------------------
 -- Actions
 --------------------------------------------------------------------------------
@@ -122,4 +139,5 @@ leave the configuration unchanged
 applyConfigurationAction :: Configuration -> Action -> Configuration
 applyConfigurationAction initial (AddParticipants participants) = addClusterParticipants initial participants
 applyConfigurationAction initial (RemoveParticipants participants) = removeClusterParticipants initial participants
+applyConfigurationAction initial (SetParticipants participants) = setClusterParticipants initial participants
 applyConfigurationAction initial _ = initial

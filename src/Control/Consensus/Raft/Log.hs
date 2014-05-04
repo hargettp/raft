@@ -21,6 +21,7 @@ module Control.Consensus.Raft.Log (
     -- * Raft state
     Raft(..),
     mkRaft,
+    raftCurrentTerm,
     RaftContext(..),
     RaftServer(..),
     RaftLog(..),
@@ -77,7 +78,6 @@ data Raft l v = (RaftLog l v,Serialize v) => Raft {raftContext :: TVar (RaftCont
 mkRaft :: (RaftLog l v) => Endpoint -> RaftServer l v -> STM (Raft l v)
 mkRaft endpoint server = do
     ctx <- newTVar $ RaftContext {
-        raftCurrentTerm = 0,
         raftLastCandidate = Nothing,
         raftEndpoint = endpoint,
         raftServer = server,
@@ -101,19 +101,25 @@ on a 'RaftServer' for customizing the use of the algorithm to a
 specific application.
 -}
 data RaftContext l v = (RaftLog l v) => RaftContext {
-    raftCurrentTerm :: Term,
     raftLastCandidate :: Maybe Name,
     raftEndpoint :: Endpoint,
     raftServer :: RaftServer l v,
     raftConfigurationObservers :: S.Set Name
 }
 
+raftCurrentTerm :: (RaftLog l v) => RaftContext l v -> Term
+raftCurrentTerm raft = serverCurrentTerm $ serverState $ raftServer raft
+
 {-|
 Update the current term in a new 'RaftContext'
 -}
 setRaftTerm :: Term -> RaftContext l v -> RaftContext l v
 setRaftTerm term raft = raft {
-    raftCurrentTerm = term
+    raftServer = (raftServer raft) {
+        serverState = (serverState $ raftServer raft) {
+            serverCurrentTerm = term
+        }
+    }
 }
 
 {-|
@@ -158,6 +164,8 @@ data RaftLogEntry =  RaftLogEntry {
 instance Serialize RaftLogEntry
 
 data RaftState v = (Eq v, Show v) => RaftState {
+    serverCurrentTerm :: Term,
+    serverNewParticipants :: Maybe (Index,[Name]),
     serverConfiguration :: Configuration,
     serverData :: v
 }
@@ -166,13 +174,18 @@ deriving instance Eq (RaftState v)
 deriving instance Show (RaftState v)
 
 instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
-    applyEntry oldRaftState entry = applyAction $ entryAction entry
+    applyEntry oldRaftState index entry = applyAction $ entryAction entry
         where
             applyAction (Cmd cmd) = do
-                let RaftState _ oldData = oldRaftState
-                newData <- applyEntry oldData cmd
+                let oldData = serverData oldRaftState
+                newData <- applyEntry oldData index cmd
                 return $ oldRaftState {serverData = newData}
             applyAction action = do
+                let cfg = applyConfigurationAction (serverConfiguration oldRaftState) action
                 return $ oldRaftState {
-                serverConfiguration = applyConfigurationAction (serverConfiguration oldRaftState) action
+                    serverNewParticipants =
+                        if isJointConfiguration cfg
+                            then Just (index,S.toList $ configurationParticipants $ jointNewConfiguration cfg)
+                            else Nothing,
+                    serverConfiguration = cfg
                 }

@@ -92,7 +92,7 @@ mkIntLog = do
 
 instance State IntState IO Command where
 
-    applyEntry initial cmd = do
+    applyEntry initial _ cmd = do
         let Right icmd = decode cmd
         applyIntCommand initial icmd
 
@@ -134,6 +134,8 @@ mkIntServer cfg sid initial = do
         serverName = sid,
         serverLog = log,
         serverState = RaftState {
+            serverCurrentTerm = 0,
+            serverNewParticipants = Nothing,
             serverConfiguration = cfg,
             serverData = IntState initial
             }

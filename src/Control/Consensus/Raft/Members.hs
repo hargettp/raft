@@ -65,11 +65,11 @@ memberAppendedTerm :: Member -> Term
 memberAppendedTerm member = let RaftTime term _ = memberLogLastAppended member
                         in term
 
-mkMember :: Name -> Member
-mkMember name = Member {
+mkMember :: RaftTime -> Name -> Member
+mkMember time name = Member {
     memberName = name,
-    memberLogLastAppended = RaftTime (-1) (-1),
-    memberLogLastCommitted = RaftTime (-1) (-1)
+    memberLogLastAppended = time,
+    memberLogLastCommitted = time
     }
 
 updateMember :: Member -> MemberResult -> Member
@@ -80,8 +80,8 @@ updateMember member result = member {
 
 type Members = M.Map Name Member
 
-mkMembers :: Configuration -> Members
-mkMembers cfg = M.fromList $ map (\name -> (name,mkMember name)) (clusterMembers cfg)
+mkMembers :: Configuration -> RaftTime -> Members
+mkMembers cfg time = M.fromList $ map (\name -> (name,mkMember time name)) (clusterMembers cfg)
 
 data MemberResult = MemberResult {
     memberActionSuccess :: Bool,

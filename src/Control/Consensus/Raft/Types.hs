@@ -100,6 +100,7 @@ electionTimeout outs = R.randomRIO $ timeoutElectionRange outs
 
 data Action = AddParticipants [Name]
     | RemoveParticipants [Name]
+    | SetParticipants [Name]
     | Cmd Command
     deriving (Eq,Show,Generic)
 

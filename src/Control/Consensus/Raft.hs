@@ -208,10 +208,21 @@ Initiate an election, volunteering to lead the cluster if elected.
 -}
 volunteer :: (RaftLog l v) => Raft l v -> IO Bool
 volunteer vRaft = do
-    results <- race (doVote vRaft False) (doVolunteer vRaft)
-    case results of
-        Left _ -> return False
-        Right won -> return won
+    participant <- atomically $ do
+        raft <- readTVar $ raftContext vRaft
+        let name = serverName $ raftServer raft
+            cfg = serverConfiguration $ serverState $ raftServer raft 
+        return $ isClusterParticipant name cfg
+    -- this allows us to have raft servers that are up and running,
+    -- but they will just patiently wait until they are a participant
+    -- before volunteering
+    if participant
+        then do
+            results <- race (doVote vRaft False) (doVolunteer vRaft)
+            case results of
+                Left _ -> return False
+                Right won -> return won
+        else return False
 
 doVolunteer :: (RaftLog l v) => Raft l v -> IO Bool
 doVolunteer vRaft = do
@@ -253,7 +264,7 @@ lead vRaft = do
         readTVar (raftContext vRaft)
     let name = serverName $ raftServer raft
         cfg = serverConfiguration $ serverState $ raftServer raft
-        members = mkMembers cfg
+        members = mkMembers cfg $ lastCommittedTime $ serverLog $ raftServer raft
         term = raftCurrentTerm raft
     clients <- atomically $ newMailbox
     actions <- atomically $ newMailbox
@@ -312,7 +323,7 @@ append vRaft actions clients = do
         Just (action,reply) -> do
             let oldLog = serverLog $ raftServer raft
                 term = raftCurrentTerm raft
-                nextIndex = (let RaftTime _ i = lastAppendedTime oldLog in i) + 1
+                nextIndex = (lastAppended oldLog) + 1
             newLog <- appendEntries oldLog nextIndex [RaftLogEntry term action]
             atomically $ do
                 modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
@@ -353,7 +364,14 @@ commit vRaft clients members = do
                                             infoM _log $ printf "Committing at time %v" (show time)
                                             commitEntries rlog newAppendedIndex (serverState $ raftServer $ raft)
                                         else return (rlog,(serverState $ raftServer $ raft))
-            notifyClients vRaft clients newLog newState
+            revisedLog <- case serverNewParticipants newState of
+                Nothing -> return newLog
+                Just (index,newParticipants) ->
+                    if lastCommitted newLog > index
+                        then appendEntries newLog ((lastAppended newLog) + 1) 
+                            [RaftLogEntry (serverCurrentTerm newState) (SetParticipants newParticipants)]
+                        else return newLog
+            notifyClients vRaft clients revisedLog newState
     return newMembers
 
 notifyClients :: (RaftLog l v) => Raft l v -> Clients -> l -> RaftState v -> IO ()
