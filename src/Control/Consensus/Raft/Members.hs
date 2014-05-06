@@ -22,6 +22,7 @@ module Control.Consensus.Raft.Members (
     Members,
     mkMembers,
     updateMembers,
+    reconfigureMembers,
     membersSafeAppendedIndex,
     membersAppendedIndex,
     membersSafeCommittedIndex,
@@ -74,14 +75,20 @@ mkMember time name = Member {
 
 updateMember :: Member -> MemberResult -> Member
 updateMember member result = member {
-    memberLogLastAppended = max (memberLogLastAppended member) (memberLastAppended result),
-    memberLogLastCommitted = max (memberLogLastCommitted member) (memberLastCommitted result)
+    memberLogLastAppended = memberLastAppended result,
+    memberLogLastCommitted = memberLastCommitted result
     }
 
 type Members = M.Map Name Member
 
 mkMembers :: Configuration -> RaftTime -> Members
 mkMembers cfg time = M.fromList $ map (\name -> (name,mkMember time name)) (clusterMembers cfg)
+
+reconfigureMembers :: Members -> Configuration -> RaftTime -> Members
+reconfigureMembers members cfg time = 
+    M.fromList $ map (\name -> case M.lookup name members of
+            Nothing -> (name,mkMember time name)
+            Just member -> (name,member)) (clusterMembers cfg)
 
 data MemberResult = MemberResult {
     memberActionSuccess :: Bool,

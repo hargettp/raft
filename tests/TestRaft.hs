@@ -116,7 +116,7 @@ test3ClusterAdd1 = do
         withClient transport "client1" cfg $ \client -> do
             RaftTime _ clientIndex <- performAction client $ AddParticipants ["server4"]
             assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
-            pause
+            _ <- waitForLeader 5 (2 :: Integer) vRafts
             newLeaders <- allLeaders vRafts
             infoM _log $ printf "New leaders are %v" (show newLeaders)
             newLastCommitted <- allLastCommitted vRafts
@@ -399,7 +399,7 @@ waitForLeader maxCount attempt vRafts = do
             if (leader /= Nothing) && (all (== leader) leaders)
                 then do
                     let msg = "After " ++ (show attempt) ++ " rounds, the leader is " ++ (show leader)
-                    if attempt > 2
+                    if attempt > 3
                         then warningM _log msg
                         else infoM _log msg
                     return leader

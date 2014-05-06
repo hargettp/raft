@@ -96,7 +96,7 @@ goAppendEntries :: CallSite
 goAppendEntries cs cfg term prevTime commitTime entries = do
     let Just leader = clusterLeader cfg
         members = clusterMembers cfg
-        timeout = (timeoutRpc $ configurationTimeouts cfg)
+        timeout = (timeoutRpc $ clusterTimeouts cfg)
     results <- gcallWithTimeout cs members methodAppendEntries timeout
         $ encode $ AppendEntries leader term prevTime commitTime entries
     return $ mapResults results
@@ -117,7 +117,7 @@ goRequestVote :: CallSite
                 -> IO (M.Map Name (Maybe MemberResult))
 goRequestVote cs cfg term candidate lastEntryTime = do
     let members = clusterMembers cfg
-    timeout <- electionTimeout $ configurationTimeouts cfg
+    timeout <- electionTimeout $ clusterTimeouts cfg
     results <- gcallWithTimeout cs members methodRequestVote timeout
         $ encode $ RequestVote candidate term lastEntryTime
     return $ mapResults results
@@ -136,7 +136,7 @@ goPerformAction :: CallSite
                     -> Action
                     -> IO (Maybe MemberResult)
 goPerformAction cs cfg member action = do
-    maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ configurationTimeouts cfg) $ encode action
+    maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ clusterTimeouts cfg) $ encode action
     case maybeMsg of
         Just msg -> case decode msg of
                         Right result -> return $ Just result
@@ -149,7 +149,7 @@ process it, and return @True@.  If none arrives before the timeout, then return 
 -}
 onAppendEntries :: Endpoint -> Configuration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe (Name,RaftTime))
 onAppendEntries endpoint cfg server fn = do
-    msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ configurationTimeouts cfg)
+    msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ clusterTimeouts cfg)
     case msg of
         Just (bytes,reply) -> do
             let Right req = decode bytes

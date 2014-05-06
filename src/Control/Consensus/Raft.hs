@@ -288,7 +288,7 @@ doPulse vRaft actions = do
             else return ()
         return raft
     let cfg = serverConfiguration $ serverState $ raftServer raft
-    threadDelay $ timeoutPulse $ configurationTimeouts cfg
+    threadDelay $ timeoutPulse $ clusterTimeouts cfg
     doPulse vRaft actions
 
 doServe :: (RaftLog l v) => Raft l v -> Actions -> IO ()
@@ -306,7 +306,7 @@ doServe vRaft actions = do
 Leaders commit entries to their log, once enough members have appended those entries.
 Once committed, the leader replies to the client who requested the action.
 -}
-doPerform :: (RaftLog l v) => Raft l v -> M.Map Name Member -> Actions -> Clients -> IO ()
+doPerform :: (RaftLog l v) => Raft l v -> Members -> Actions -> Clients -> IO ()
 doPerform vRaft members actions clients = do
     append vRaft actions clients
     newMembers <- commit vRaft clients members
@@ -334,18 +334,18 @@ append vRaft actions clients = do
 commit :: (RaftLog l v) => Raft l v -> Clients -> Members -> IO Members
 commit vRaft clients members = do
     raft <- atomically $ readTVar (raftContext vRaft)
-    let rlog = serverLog $ raftServer raft
+    let initialLog = serverLog $ raftServer raft
         leader = serverName $ raftServer raft
         endpoint = raftEndpoint raft
         cs = newCallSite endpoint leader
         term = raftCurrentTerm raft
-        prevTime = lastCommittedTime rlog
+        prevTime = lastCommittedTime initialLog
         cfg = serverConfiguration $ serverState $ raftServer raft
-    (commitIndex,entries) <- fetchLatestEntries rlog
+    (commitIndex,entries) <- fetchLatestEntries initialLog
     infoM _log $ printf "Synchronizing from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
     infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
-    let newMembers = updateMembers members results
+    let newMembers = updateMembers (reconfigureMembers members cfg (lastCommittedTime initialLog)) results
         newAppendedIndex = membersSafeAppendedIndex newMembers cfg
         newTerm = membersHighestTerm newMembers
     infoM _log $ printf "Safe appended index is %v" (show newAppendedIndex)
@@ -362,15 +362,17 @@ commit vRaft clients members = do
                                      in if count > 0
                                         then do
                                             infoM _log $ printf "Committing at time %v" (show time)
-                                            commitEntries rlog newAppendedIndex (serverState $ raftServer $ raft)
-                                        else return (rlog,(serverState $ raftServer $ raft))
+                                            commitEntries initialLog newAppendedIndex (serverState $ raftServer $ raft)
+                                        else return (initialLog,(serverState $ raftServer $ raft))
             revisedLog <- case serverNewParticipants newState of
                 Nothing -> return newLog
                 Just (index,newParticipants) ->
-                    if lastCommitted newLog > index
-                        then appendEntries newLog ((lastAppended newLog) + 1) 
+                    if lastCommitted newLog >= index
+                        then appendEntries newLog ((lastAppended newLog) + 1)
                             [RaftLogEntry (serverCurrentTerm newState) (SetParticipants newParticipants)]
                         else return newLog
+            atomically $ modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog revisedLog
+                                                $ setRaftState newState oldRaft
             notifyClients vRaft clients revisedLog newState
     return newMembers
 

@@ -53,8 +53,15 @@ import GHC.Generics
 
 import Network.Endpoints
 
+import System.Log.Logger
+
+import Text.Printf
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
+
+_log :: String
+_log = "raft.consensus"
 
 {-|
 `RaftTime` captures a measure of how up to date a log is.
@@ -134,13 +141,23 @@ setRaftLastCandidate candidate raft = raft {
 Update the 'RaftState' in a new 'RaftContext' to specify a new leader
 -}
 setRaftLeader :: Maybe Name -> RaftContext l v -> RaftContext l v
-setRaftLeader leader raft = raft {
-    raftServer = (raftServer raft) {
-        serverState = (serverState $ raftServer raft) {
-            serverConfiguration = (serverConfiguration $ serverState $ raftServer raft) {
-                configurationLeader = leader
-            }}}
-}
+setRaftLeader leader raft = 
+    let cfg = serverConfiguration $ serverState $ raftServer raft
+        in case cfg of
+            Configuration _ _ _ _ -> raft {
+                raftServer = (raftServer raft) {
+                    serverState = (serverState $ raftServer raft) {
+                        serverConfiguration = cfg {
+                            configurationLeader = leader
+                        }}}
+                }
+            JointConfiguration _ jointNew -> raft {
+                raftServer = (raftServer raft) {
+                    serverState = (serverState $ raftServer raft) {
+                        serverConfiguration = jointNew {
+                            configurationLeader = leader
+                        }}}
+                }
 
 setRaftLog :: (RaftLog l v) => l -> RaftContext l v -> RaftContext l v
 setRaftLog rlog raft = raft {
@@ -182,6 +199,7 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
                 return $ oldRaftState {serverData = newData}
             applyAction action = do
                 let cfg = applyConfigurationAction (serverConfiguration oldRaftState) action
+                infoM _log $ printf "New configuration is %v" (show cfg)
                 return $ oldRaftState {
                     serverNewParticipants =
                         if isJointConfiguration cfg

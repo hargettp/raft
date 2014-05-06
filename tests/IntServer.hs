@@ -1,6 +1,7 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -52,7 +53,7 @@ data IntCommand = Add Int
     | Subtract Int
     | Multiply Int
     | Divide Int
-    deriving (Generic)
+    deriving (Generic,Show)
 
 instance Serialize IntCommand
 
@@ -68,7 +69,7 @@ applyIntCommand (IntState initial) (Divide value) = return $ IntState $ initial 
 
 data IntLogEntry = IntLogEntry {
     entryCommand :: IntCommand
-} deriving (Generic)
+} deriving (Generic,Show)
 
 instance Serialize IntLogEntry
 
@@ -76,7 +77,7 @@ data IntLog = IntLog {
     numberLogLastCommitted :: RaftTime,
     numberLogLastAppended :: RaftTime,
     numberLogEntries :: [RaftLogEntry]
-}
+} deriving (Show)
 
 instance RaftLog IntLog IntState where
     lastAppendedTime = numberLogLastAppended
@@ -124,6 +125,8 @@ instance Log IntLog IO RaftLogEntry (RaftState IntState) where
         return newLog
 
 type IntServer = RaftServer IntLog IntState
+
+deriving instance Show IntServer
 
 type IntRaft = Raft IntLog IntState
 
