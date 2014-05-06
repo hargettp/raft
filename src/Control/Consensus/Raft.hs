@@ -138,6 +138,7 @@ doFollow vRaft leading = do
                     index = (1 + (logIndex $ aePreviousTime req))
                 newLog <- appendEntries log index (aeEntries req)
                 updatedRaft <- atomically $ do
+                        preCommitConfigurationChange vRaft (aeEntries req)
                         modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
                         readTVar (raftContext vRaft)
                 return $ mkResult valid updatedRaft
@@ -162,6 +163,19 @@ doFollow vRaft leading = do
                 else doFollow vRaft leading
         -- we heard no message before timeout
         Nothing -> return ()
+
+preCommitConfigurationChange :: (RaftLog l v) => Raft l v -> [RaftLogEntry] -> STM ()
+preCommitConfigurationChange _ [] = return ()
+preCommitConfigurationChange vRaft (entry:entries) = do
+    case entryAction entry of
+        Cmd _ -> return ()
+        action -> do
+            raft <- readTVar (raftContext vRaft)
+            let oldRaftState = serverState $ raftServer raft
+                newCfg = applyConfigurationAction (serverConfiguration oldRaftState) action
+                newRaft = setRaftConfiguration newCfg raft
+            writeTVar (raftContext vRaft) newRaft
+    preCommitConfigurationChange vRaft entries
 
 {-|
 Wait for request vote requests and process them
@@ -326,7 +340,12 @@ append vRaft actions clients = do
                 nextIndex = (lastAppended oldLog) + 1
             newLog <- appendEntries oldLog nextIndex [RaftLogEntry term action]
             atomically $ do
-                modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
+                modifyTVar (raftContext vRaft) $ \oldRaft ->
+                    setRaftLog newLog $ case action of
+                        Cmd _ -> oldRaft
+                        -- precommitting configuration changes
+                        cfgAction -> let newCfg = applyConfigurationAction (serverConfiguration $ serverState $ raftServer oldRaft) cfgAction
+                                         in setRaftConfiguration newCfg oldRaft
                 writeMailbox clients (lastAppended newLog,reply)
             infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()

@@ -32,6 +32,7 @@ module Control.Consensus.Raft.Log (
     setRaftTerm,
     setRaftLeader,
     setRaftLastCandidate,
+    setRaftConfiguration,
     setRaftLog,
     setRaftState
 ) where
@@ -166,6 +167,13 @@ setRaftLog rlog raft = raft {
         }
     }
 
+setRaftConfiguration :: (RaftLog l v) => Configuration -> RaftContext l v -> RaftContext l v
+setRaftConfiguration cfg raft =
+    let newState = (serverState $ raftServer raft) {
+        serverConfiguration = cfg
+        }
+        in setRaftState newState raft
+    
 setRaftState :: (RaftLog l v) => RaftState v -> RaftContext l v -> RaftContext l v
 setRaftState state raft = raft {
     raftServer = (raftServer raft) {
