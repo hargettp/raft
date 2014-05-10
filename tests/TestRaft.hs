@@ -368,8 +368,8 @@ checkForConsistency run possibleLeader vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
-        results = map (serverData . serverState)  servers
+    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
+        results = map (raftStateData . serverState)  servers
     -- all results should be equal--and since we didn't perform any commands, should still be 0
     assertBool ((show run) ++ ": All results should be equal") $ all (== (IntState 0)) results
     assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
@@ -388,7 +388,7 @@ waitForLeader maxCount attempt vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
         leader = leaders !! 0
     if maxCount <= 0
         then do
@@ -411,7 +411,7 @@ allLeaders vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
     return leaders
 
 allStates :: [Raft IntLog IntState] -> IO [IntState]
@@ -419,7 +419,7 @@ allStates vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let states = map (serverData . serverState) servers
+    let states = map (raftStateData . serverState) servers
     return states
 
 allLastCommitted :: [Raft IntLog IntState] -> IO [Index]

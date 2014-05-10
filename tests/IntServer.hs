@@ -34,6 +34,7 @@ module IntServer (
 import Control.Consensus.Log
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Log
+import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
 
 -- external imports
@@ -92,6 +93,8 @@ mkIntLog = do
     }
 
 instance State IntState IO Command where
+    -- canApplyEntry :: s -> Index -> e -> m Bool
+    canApplyEntry _ _ _ = return True
 
     applyEntry initial _ cmd = do
         let Right icmd = decode cmd
@@ -131,15 +134,17 @@ deriving instance Show IntServer
 type IntRaft = Raft IntLog IntState
 
 mkIntServer :: Configuration -> Name -> Int -> IO IntServer
-mkIntServer cfg sid initial = do
+mkIntServer cfg name initial = do
     log <- mkIntLog
     return RaftServer {
-        serverName = sid,
+        serverName = name,
         serverLog = log,
         serverState = RaftState {
-            serverCurrentTerm = 0,
-            serverNewParticipants = Nothing,
-            serverConfiguration = cfg,
-            serverData = IntState initial
+            raftStateCurrentTerm = 0,
+            raftStateNewParticipants = Nothing,
+            raftStateName = name,
+            raftStateConfiguration = cfg,
+            raftStateMembers = mkMembers cfg initialRaftTime,
+            raftStateData = IntState initial
             }
     }

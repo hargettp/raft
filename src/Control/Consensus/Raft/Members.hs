@@ -23,6 +23,8 @@ module Control.Consensus.Raft.Members (
     mkMembers,
     updateMembers,
     reconfigureMembers,
+    membersSafeAppendedTerm,
+    membersAppendedTerm,
     membersSafeAppendedIndex,
     membersAppendedIndex,
     membersSafeCommittedIndex,
@@ -30,7 +32,6 @@ module Control.Consensus.Raft.Members (
     membersHighestTerm,
 
     MemberResult(..),
-    mkResult,
 
     MemberResults
 ) where
@@ -39,7 +40,7 @@ module Control.Consensus.Raft.Members (
 
 import Control.Consensus.Log
 import Control.Consensus.Raft.Configuration
-import Control.Consensus.Raft.Log
+-- import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Types
 
 -- external imports
@@ -60,7 +61,7 @@ data Member = Member {
     memberName :: Name,
     memberLogLastAppended :: RaftTime,
     memberLogLastCommitted :: RaftTime
-} deriving (Show)
+} deriving (Eq,Show)
 
 memberAppendedTerm :: Member -> Term
 memberAppendedTerm member = let RaftTime term _ = memberLogLastAppended member
@@ -100,15 +101,6 @@ data MemberResult = MemberResult {
 
 instance Serialize MemberResult
 
-mkResult :: (RaftLog l v) => Bool -> RaftContext l v -> MemberResult
-mkResult success raft = MemberResult {
-    memberActionSuccess = success,
-    memberLeader = clusterLeader $ serverConfiguration $ serverState $ raftServer raft,
-    memberCurrentTerm = raftCurrentTerm raft,
-    memberLastAppended = lastAppendedTime $ serverLog $ raftServer raft,
-    memberLastCommitted = lastCommittedTime $ serverLog $ raftServer raft
-}
-
 type MemberResults =  M.Map Name (Maybe MemberResult)
 
 updateMembers :: Members -> MemberResults -> Members
@@ -120,6 +112,28 @@ updateMembers members results = M.map applyUpdates members
                 Just Nothing -> member
                 Just (Just result) -> updateMember member result
 
+membersSafeAppendedTerm :: Members -> Configuration -> Term
+membersSafeAppendedTerm members cfg@(Configuration _ _ _ _) =
+    if M.null members
+        then -1
+        else (membersAppendedTerm members cfg) !! majority
+    where
+        majority = (S.size $ configurationParticipants cfg) `quot` 2
+membersSafeAppendedTerm members (JointConfiguration jointOld jointNew) =
+    min (membersSafeAppendedTerm members jointOld) (membersSafeAppendedTerm members jointNew)
+
+membersAppendedTerm :: Members -> Configuration -> [Term]
+membersAppendedTerm members cfg = 
+    map (logTerm . memberLogLastAppended) sortedParticipants
+    where
+        sortedParticipants = L.sortBy byAppendedTerm $
+            filter (\mbr -> elem (memberName mbr) $ clusterParticipants cfg) $ M.elems members
+        byAppendedTerm left right =
+            let leftTerm = logTerm $ memberLogLastAppended left
+                rightTerm = logTerm $ memberLogLastAppended right
+            -- inverting the ordering so that we sort from high to low
+            in compare rightTerm leftTerm
+
 {-|
 Find the highest log entry `Index` that has already been appended
 on a majority of members. We do so by sorting members based on their
@@ -128,11 +142,14 @@ value that is less than or equal to the highest appended
 log entry index on the majority of servers.
 -}
 membersSafeAppendedIndex :: Members -> Configuration -> Index
-membersSafeAppendedIndex members cfg =
-    (membersAppendedIndex members cfg) !! (majority cfg)
+membersSafeAppendedIndex members cfg@(Configuration _ _ _ _) =
+    if M.null members
+        then -1
+        else (membersAppendedIndex members cfg) !! majority
     where
-        majority (Configuration _ participants _ _) = (S.size participants) `quot` 2
-        majority (JointConfiguration jointOld jointNew) = min (majority jointOld) (majority jointNew)
+        majority = (S.size $ configurationParticipants cfg) `quot` 2
+membersSafeAppendedIndex members (JointConfiguration jointOld jointNew) =
+    min (membersSafeAppendedIndex members jointOld) (membersSafeAppendedIndex members jointNew)
 
 membersAppendedIndex :: Members -> Configuration -> [Index]
 membersAppendedIndex members cfg = 

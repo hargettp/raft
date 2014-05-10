@@ -17,6 +17,10 @@
 module Control.Consensus.Raft.Types (
     -- * General types
     Term,
+    RaftTime(..),
+    initialRaftTime,
+    logIndex,
+    logTerm,
     Timeout,
     Timeouts(..),
     defaultTimeouts,
@@ -29,6 +33,8 @@ module Control.Consensus.Raft.Types (
 ) where
 
 -- local imports
+
+import Control.Consensus.Log
 
 -- external imports
 
@@ -45,6 +51,22 @@ import qualified System.Random as R
 --------------------------------------------------------------------------------
 
 type Term = Int
+
+{-|
+`RaftTime` captures a measure of how up to date a log is.
+-}
+data RaftTime = RaftTime Term Index deriving (Show,Eq,Ord,Generic)
+
+initialRaftTime :: RaftTime
+initialRaftTime = RaftTime (-1) (-1)
+
+logIndex :: RaftTime -> Index
+logIndex (RaftTime _ index) = index
+
+logTerm :: RaftTime -> Term
+logTerm (RaftTime term _) = term
+
+instance Serialize RaftTime
 
 --------------------------------------------------------------------------------
 -- Timeouts
