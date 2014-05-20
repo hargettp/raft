@@ -376,11 +376,11 @@ commit vRaft clients = do
         newAppendedIndex = membersSafeAppendedIndex newMembers cfg
         newTerm = membersHighestTerm newMembers
     atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
-        setRaftMembers newMembers
-            $ setRaftTerm newTerm oldRaft
+        setRaftMembers newMembers oldRaft
     infoM _log $ printf "Safe appended index is %v" (show newAppendedIndex)
     if newTerm > (raftCurrentTerm raft)
         then do
+            atomically $ modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftTerm newTerm oldRaft
             infoM _log $ printf "Leader stepping down; new term %v discovered" (show newTerm)
             return ()
         else do
