@@ -372,26 +372,27 @@ commit vRaft clients = do
     results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
     infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     let members = raftMembers raft
-        newMembers = updateMembers (reconfigureMembers members cfg (lastCommittedTime initialLog)) results
+        newMembers = updateMembers members results
         newAppendedIndex = membersSafeAppendedIndex newMembers cfg
         newTerm = membersHighestTerm newMembers
+    atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
+        setRaftMembers newMembers
+            $ setRaftTerm newTerm oldRaft
     infoM _log $ printf "Safe appended index is %v" (show newAppendedIndex)
     if newTerm > (raftCurrentTerm raft)
         then do
             infoM _log $ printf "Leader stepping down; new term %v discovered" (show newTerm)
-            atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
-                setRaftMembers newMembers
-                    $ setRaftTerm newTerm oldRaft
             return ()
         else do
-            (newLog,newState) <- let time = (RaftTime (raftCurrentTerm raft) newAppendedIndex)
+            newRaft <- atomically $ readTVar $ raftContext vRaft
+            (newLog,newState) <- let time = (RaftTime (raftCurrentTerm newRaft) newAppendedIndex)
                                      oldCommitedIndex = commitIndex
                                      count = newAppendedIndex - oldCommitedIndex
                                      in if count > 0
                                         then do
                                             infoM _log $ printf "Committing at time %v" (show time)
-                                            commitEntries initialLog newAppendedIndex (serverState $ raftServer $ raft)
-                                        else return (initialLog,(serverState $ raftServer $ raft))
+                                            commitEntries initialLog newAppendedIndex (serverState $ raftServer $ newRaft)
+                                        else return (initialLog,(serverState $ raftServer $ newRaft))
             revisedLog <- case raftStateNewParticipants newState of
                 Nothing -> return newLog
                 Just (index,newParticipants) ->
@@ -401,8 +402,8 @@ commit vRaft clients = do
                         else return newLog
             atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
                 setRaftLog revisedLog
-                    $ setRaftMembers newMembers
-                        $ setRaftState newState oldRaft
+                    $ setRaftState newState
+                        $ setRaftMembers newMembers oldRaft
             notifyClients vRaft clients revisedLog newState
     return ()
 

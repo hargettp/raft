@@ -36,6 +36,7 @@ module Control.Consensus.Raft.Log (
     setRaftConfiguration,
     raftConfiguration,
     raftMembers,
+    raftSafeAppendedTerm,
     setRaftMembers,
     setRaftLog,
     setRaftState
@@ -52,6 +53,7 @@ import Control.Consensus.Raft.Types
 
 import Control.Concurrent.STM
 
+import qualified Data.Map as M
 import Data.Serialize
 import qualified Data.Set as S
 
@@ -143,6 +145,12 @@ setRaftMembers members raft = raft {
 raftMembers :: (RaftLog l v) => RaftContext l v -> Members
 raftMembers raft = raftStateMembers $ serverState $ raftServer raft
 
+raftSafeAppendedTerm :: (RaftLog l v) => RaftContext l v -> Term
+raftSafeAppendedTerm raft = 
+    let members = raftMembers raft
+        cfg = raftConfiguration raft
+        in membersSafeAppendedTerm members cfg
+
 {-|
 Update the last candidate in a new 'RaftContext'
 -}
@@ -230,19 +238,18 @@ deriving instance Eq (RaftState v)
 deriving instance Show (RaftState v)
 
 instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
-    canApplyEntry oldRaftState index entry = 
-        {-
+    canApplyEntry oldRaftState index entry = do
         let members = raftStateMembers oldRaftState
             cfg = raftStateConfiguration oldRaftState
             term = membersSafeAppendedTerm members cfg
+            currentTerm = raftStateCurrentTerm oldRaftState
             leader = (Just $ raftStateName oldRaftState) == (clusterLeader cfg)
-            in if leader 
+        infoM _log $ printf "%v: Safe term for members %v is %v" currentTerm (show $ M.map (logTerm . memberLogLastAppended) members) term
+        if leader
                 then if term /= raftStateCurrentTerm oldRaftState
                     then return False
                     else canApply $ entryAction entry
                 else canApply $ entryAction entry
-        -}
-        canApply $ entryAction entry
         where
             canApply (Cmd cmd) = do
                 let oldData = raftStateData oldRaftState

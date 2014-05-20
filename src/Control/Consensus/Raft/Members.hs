@@ -59,23 +59,22 @@ import Network.Endpoints
 
 data Member = Member {
     memberName :: Name,
+    memberTerm :: Term,
     memberLogLastAppended :: RaftTime,
     memberLogLastCommitted :: RaftTime
 } deriving (Eq,Show)
 
-memberAppendedTerm :: Member -> Term
-memberAppendedTerm member = let RaftTime term _ = memberLogLastAppended member
-                        in term
-
 mkMember :: RaftTime -> Name -> Member
 mkMember time name = Member {
     memberName = name,
+    memberTerm = logTerm time,
     memberLogLastAppended = time,
     memberLogLastCommitted = time
     }
 
 updateMember :: Member -> MemberResult -> Member
 updateMember member result = member {
+    memberTerm = memberCurrentTerm result,
     memberLogLastAppended = memberLastAppended result,
     memberLogLastCommitted = memberLastCommitted result
     }
@@ -188,4 +187,4 @@ membersCommittedIndex members =
             in compare rightIndex leftIndex
 
 membersHighestTerm :: Members -> Term
-membersHighestTerm members = maximum $ map memberAppendedTerm $ M.elems members
+membersHighestTerm members = maximum $ map memberTerm $ M.elems members
