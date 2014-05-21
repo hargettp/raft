@@ -28,7 +28,9 @@ module Control.Consensus.Raft.Types (
     electionTimeout,
     -- * Actions
     Action(..),
-    Command
+    Command,
+    isCommandAction,
+    isConfigurationAction
 
 ) where
 
@@ -135,3 +137,10 @@ here in their completely typeless form as a 'B.ByteString', because that's the
 most concrete description of them.
 -}
 type Command = B.ByteString
+
+isCommandAction :: Action -> Bool
+isCommandAction (Cmd _) = True
+isCommandAction _ = False
+
+isConfigurationAction :: Action -> Bool
+isConfigurationAction = not . isCommandAction

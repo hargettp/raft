@@ -367,7 +367,7 @@ commit vRaft clients = do
         term = raftCurrentTerm raft
         prevTime = lastCommittedTime initialLog
         cfg = raftStateConfiguration $ serverState $ raftServer raft
-    (commitIndex,entries) <- fetchLatestEntries initialLog
+    (commitIndex,entries) <- gatherLatestEntries initialLog
     infoM _log $ printf "Synchronizing from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
     infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
@@ -406,6 +406,26 @@ commit vRaft clients = do
                         $ setRaftMembers newMembers oldRaft
             notifyClients vRaft clients revisedLog newState
     return ()
+
+
+{-|
+Return a list of entries, with either a configuration `Action` at the beginning of the list,
+or no configuration `Action1 at all in the list. By batching entries in this manner, it becomes
+easier to know when to pre-commit a configuration change, and what configuration should be in force
+when committing all subsequent entries in the list.
+-}
+gatherLatestEntries :: (RaftLog l v) => l -> IO (Index,[RaftLogEntry])
+gatherLatestEntries log = do
+    (commitIndex,entries) <- fetchLatestEntries log
+    case entries of
+        [] -> return (commitIndex,entries)
+        (first:rest) -> if isConfigurationEntry first
+                then return (commitIndex,(first:commandEntries rest))
+                else return (commitIndex,commandEntries (first:rest))
+        where
+        isConfigurationEntry = isConfigurationAction . entryAction
+        isCommandEntry = isCommandAction . entryAction
+        commandEntries = takeWhile isCommandEntry
 
 notifyClients :: (RaftLog l v) => Raft l v -> Clients -> l -> RaftState v -> IO ()
 notifyClients vRaft clients newLog newState = do
