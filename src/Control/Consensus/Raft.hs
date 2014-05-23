@@ -393,18 +393,21 @@ commit vRaft clients = do
                                             infoM _log $ printf "Committing at time %v" (show time)
                                             commitEntries initialLog newAppendedIndex (serverState $ raftServer $ newRaft)
                                         else return (initialLog,(serverState $ raftServer $ newRaft))
-            revisedLog <- case raftStateNewParticipants newState of
-                Nothing -> return newLog
+            (revisedLog,revisedState) <- case raftStateNewParticipants newState of
+                Nothing -> return (newLog,newState)
                 Just (index,newParticipants) ->
                     if lastCommitted newLog >= index
-                        then appendEntries newLog ((lastAppended newLog) + 1)
-                            [RaftLogEntry (raftStateCurrentTerm newState) (SetParticipants newParticipants)]
-                        else return newLog
+                        then do
+                            revisedLog <- appendEntries newLog ((lastAppended newLog) + 1)
+                                    [RaftLogEntry (raftStateCurrentTerm newState) (SetParticipants newParticipants)]
+                            let revisedState = newState {raftStateNewParticipants = Nothing}
+                            return (revisedLog,revisedState)
+                        else return (newLog,newState)
             atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
                 setRaftLog revisedLog
-                    $ setRaftState newState
+                    $ setRaftState revisedState
                         $ setRaftMembers newMembers oldRaft
-            notifyClients vRaft clients revisedLog newState
+            notifyClients vRaft clients revisedLog revisedState
     return ()
 
 
