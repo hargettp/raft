@@ -17,7 +17,7 @@
 module Control.Consensus.Raft.Configuration (
     -- * Configuration
     Configuration(..),
-    newConfiguration,
+    mkConfiguration,
     clusterTimeouts,
     isJointConfiguration,
     clusterLeader,
@@ -70,8 +70,8 @@ data Configuration = Configuration {
 
 instance Serialize Configuration
 
-newConfiguration :: [Name] -> Configuration
-newConfiguration participants = Configuration {
+mkConfiguration :: [Name] -> Configuration
+mkConfiguration participants = Configuration {
     configurationLeader = Nothing,
     configurationParticipants = S.fromList participants,
     configurationObservers = S.empty,
@@ -148,6 +148,12 @@ Apply the 'Action' to the 'Configuration', if it is a configuration change; othe
 leave the configuration unchanged
 -}
 applyConfigurationAction :: Configuration -> Action -> Configuration
+-- Joint config
+applyConfigurationAction (JointConfiguration jointOld jointNew) (AddParticipants participants) = JointConfiguration jointOld $ addClusterParticipants jointNew participants
+applyConfigurationAction (JointConfiguration jointOld jointNew) (RemoveParticipants participants) = JointConfiguration jointOld $ removeClusterParticipants jointNew participants
+applyConfigurationAction (JointConfiguration _ jointNew) (SetParticipants participants) = setClusterParticipants jointNew participants
+applyConfigurationAction (JointConfiguration jointOld jointNew) _ = JointConfiguration jointOld jointNew
+-- Single config
 applyConfigurationAction initial (AddParticipants participants) = JointConfiguration initial $ addClusterParticipants initial participants
 applyConfigurationAction initial (RemoveParticipants participants) = JointConfiguration initial $ removeClusterParticipants initial participants
 applyConfigurationAction initial (SetParticipants participants) = setClusterParticipants initial participants

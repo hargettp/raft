@@ -34,6 +34,7 @@ module Control.Consensus.Raft.Log (
     isRaftLeader,
     setRaftLastCandidate,
     setRaftConfiguration,
+    setRaftConfigurationIndex,
     raftConfiguration,
     raftMembers,
     raftSafeAppendedTerm,
@@ -201,6 +202,13 @@ setRaftConfiguration cfg raft =
 raftConfiguration :: (RaftLog l v) => RaftContext l v -> Configuration 
 raftConfiguration raft = raftStateConfiguration $ serverState $ raftServer raft
 
+setRaftConfigurationIndex :: (RaftLog l v) => Maybe Index -> RaftContext l v -> RaftContext l v
+setRaftConfigurationIndex index raft =
+    let newState = (serverState $ raftServer raft) {
+        raftStateConfigurationIndex = index
+        }
+        in setRaftState newState raft
+
 setRaftState :: (RaftLog l v) => RaftState v -> RaftContext l v -> RaftContext l v
 setRaftState state raft = raft {
     raftServer = (raftServer raft) {
@@ -217,20 +225,20 @@ instance Serialize RaftLogEntry
 
 data RaftState v = (Eq v, Show v) => RaftState {
     raftStateCurrentTerm :: Term,
-    raftStateNewParticipants :: Maybe (Index,[Name]),
     raftStateName :: Name,
+    raftStateConfigurationIndex :: Maybe Index,
     raftStateConfiguration :: Configuration,
     raftStateMembers :: Members,
     raftStateData :: v
 }
 
-mkRaftState :: (Eq v, Show v) => v -> Name -> RaftState v
-mkRaftState initialData name = let cfg = newConfiguration [] in RaftState {
+mkRaftState :: (Eq v, Show v) => v -> Configuration -> Name -> RaftState v
+mkRaftState initialData cfg name = RaftState {
     raftStateCurrentTerm = 0,
-    raftStateNewParticipants = Nothing,
     raftStateName = name,
+    raftStateConfigurationIndex = Nothing,
     raftStateConfiguration = cfg,
-    raftStateMembers = mkMembers cfg $ RaftTime (-1) (-1),
+    raftStateMembers = mkMembers cfg initialRaftTime,
     raftStateData = initialData
 }
 
@@ -267,9 +275,6 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
                 let cfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
                 infoM _log $ printf "New configuration is %v" (show cfg)
                 return $ oldRaftState {
-                    raftStateNewParticipants =
-                        if isJointConfiguration cfg
-                            then Just (index,S.toList $ configurationParticipants $ jointNewConfiguration cfg)
-                            else Nothing,
+                    raftStateConfigurationIndex = Just index,
                     raftStateConfiguration = cfg
                 }

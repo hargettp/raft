@@ -438,7 +438,7 @@ withClient transport name cfg fn = do
     fn client
 
 newTestConfiguration :: [Name] -> Configuration
-newTestConfiguration members = (newConfiguration members) {configurationTimeouts = testTimeouts}
+newTestConfiguration members = (mkConfiguration members) {configurationTimeouts = testTimeouts}
 
 pause :: IO ()
 pause = threadDelay serverTimeout

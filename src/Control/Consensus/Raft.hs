@@ -352,7 +352,7 @@ append vRaft actions clients = do
                         Cmd _ -> oldRaft
                         -- precommitting configuration changes
                         cfgAction -> let newCfg = applyConfigurationAction (raftStateConfiguration $ serverState $ raftServer oldRaft) cfgAction
-                                         in setRaftConfiguration newCfg oldRaft
+                                         in setRaftConfiguration newCfg $ setRaftConfigurationIndex (Just nextIndex) oldRaft
                 writeMailbox clients (lastAppended newLog,reply)
             infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()
@@ -393,14 +393,17 @@ commit vRaft clients = do
                                             infoM _log $ printf "Committing at time %v" (show time)
                                             commitEntries initialLog newAppendedIndex (serverState $ raftServer $ newRaft)
                                         else return (initialLog,(serverState $ raftServer $ newRaft))
-            (revisedLog,revisedState) <- case raftStateNewParticipants newState of
+            (revisedLog,revisedState) <- case raftStateConfigurationIndex newState of
                 Nothing -> return (newLog,newState)
-                Just (index,newParticipants) ->
-                    if lastCommitted newLog >= index
+                Just cfgIndex ->
+                    if lastCommitted newLog >= cfgIndex
                         then do
+                            let newParticipants = case raftStateConfiguration newState of
+                                    JointConfiguration _ jointNew -> clusterParticipants jointNew
+                                    newCfg -> clusterParticipants newCfg
                             revisedLog <- appendEntries newLog ((lastAppended newLog) + 1)
                                     [RaftLogEntry (raftStateCurrentTerm newState) (SetParticipants newParticipants)]
-                            let revisedState = newState {raftStateNewParticipants = Nothing}
+                            let revisedState = newState {raftStateConfigurationIndex = Nothing}
                             return (revisedLog,revisedState)
                         else return (newLog,newState)
             atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->

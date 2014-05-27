@@ -34,7 +34,6 @@ module IntServer (
 import Control.Consensus.Log
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Log
-import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
 
 -- external imports
@@ -139,12 +138,15 @@ mkIntServer cfg name initial = do
     return RaftServer {
         serverName = name,
         serverLog = log,
+        serverState = mkRaftState (IntState initial) cfg name
+        {-
         serverState = RaftState {
             raftStateCurrentTerm = 0,
-            raftStateNewParticipants = Nothing,
             raftStateName = name,
+            raftStateConfigurationIndex = Nothing,
             raftStateConfiguration = cfg,
             raftStateMembers = mkMembers cfg initialRaftTime,
             raftStateData = IntState initial
             }
+        -}
     }
