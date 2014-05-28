@@ -106,9 +106,13 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
             commit oldLog oldState _ [] = do
                 return (oldLog,oldState)
             commit oldLog oldState commitIndex (entry:rest) = do
-                newLog <- commitEntry oldLog commitIndex entry
-                newState <- applyEntry oldState entry
-                commit newLog newState (commitIndex + 1)  rest
+                can <- canApplyEntry oldState commitIndex entry
+                if can
+                    then do
+                        newLog <- commitEntry oldLog commitIndex entry
+                        newState <- applyEntry oldState commitIndex entry
+                        commit newLog newState (commitIndex + 1)  rest
+                    else return (oldLog,oldState)
 
     {-|
     Records a single entry in the log as committed; note that
@@ -132,7 +136,8 @@ entry operates within a chosen 'Monad', so implementers are free to implement
 'State' as needed (e.g., use 'IO', 'STM', etc.).
 -}
 class (Monad m) => State s m e where
-    applyEntry :: s -> e -> m s
+    canApplyEntry :: s -> Index -> e -> m Bool
+    applyEntry :: s -> Index -> e -> m s
 
 {-|
 Return all entries from the 'Log''s 'lastCommitted' time up to and

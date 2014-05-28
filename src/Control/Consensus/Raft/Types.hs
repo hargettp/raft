@@ -17,6 +17,10 @@
 module Control.Consensus.Raft.Types (
     -- * General types
     Term,
+    RaftTime(..),
+    initialRaftTime,
+    logIndex,
+    logTerm,
     Timeout,
     Timeouts(..),
     defaultTimeouts,
@@ -25,21 +29,19 @@ module Control.Consensus.Raft.Types (
     -- * Actions
     Action(..),
     Command,
-    -- * Subscriptions
-    Subscription,
-    mkSubscription
+    isCommandAction,
+    isConfigurationAction
 
 ) where
 
 -- local imports
 
+import Control.Consensus.Log
+
 -- external imports
 
 import qualified Data.ByteString as B
 import Data.Serialize
-import Data.UUID
-import Data.UUID.V4
-import Data.Word
 
 import GHC.Generics
 
@@ -51,6 +53,22 @@ import qualified System.Random as R
 --------------------------------------------------------------------------------
 
 type Term = Int
+
+{-|
+`RaftTime` captures a measure of how up to date a log is.
+-}
+data RaftTime = RaftTime Term Index deriving (Show,Eq,Ord,Generic)
+
+initialRaftTime :: RaftTime
+initialRaftTime = RaftTime (-1) (-1)
+
+logIndex :: RaftTime -> Index
+logIndex (RaftTime _ index) = index
+
+logTerm :: RaftTime -> Term
+logTerm (RaftTime term _) = term
+
+instance Serialize RaftTime
 
 --------------------------------------------------------------------------------
 -- Timeouts
@@ -106,6 +124,7 @@ electionTimeout outs = R.randomRIO $ timeoutElectionRange outs
 
 data Action = AddParticipants [Name]
     | RemoveParticipants [Name]
+    | SetParticipants [Name]
     | Cmd Command
     deriving (Eq,Show,Generic)
 
@@ -119,10 +138,9 @@ most concrete description of them.
 -}
 type Command = B.ByteString
 
--- TODO this should be in courier
-type Subscription = (Word32, Word32, Word32, Word32)
+isCommandAction :: Action -> Bool
+isCommandAction (Cmd _) = True
+isCommandAction _ = False
 
-mkSubscription :: IO Subscription
-mkSubscription = do
-    ruuid <- nextRandom
-    return $ toWords ruuid
+isConfigurationAction :: Action -> Bool
+isConfigurationAction = not . isCommandAction

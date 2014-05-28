@@ -1,6 +1,7 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -52,7 +53,7 @@ data IntCommand = Add Int
     | Subtract Int
     | Multiply Int
     | Divide Int
-    deriving (Generic)
+    deriving (Generic,Show)
 
 instance Serialize IntCommand
 
@@ -68,7 +69,7 @@ applyIntCommand (IntState initial) (Divide value) = return $ IntState $ initial 
 
 data IntLogEntry = IntLogEntry {
     entryCommand :: IntCommand
-} deriving (Generic)
+} deriving (Generic,Show)
 
 instance Serialize IntLogEntry
 
@@ -76,7 +77,7 @@ data IntLog = IntLog {
     numberLogLastCommitted :: RaftTime,
     numberLogLastAppended :: RaftTime,
     numberLogEntries :: [RaftLogEntry]
-}
+} deriving (Show)
 
 instance RaftLog IntLog IntState where
     lastAppendedTime = numberLogLastAppended
@@ -91,8 +92,10 @@ mkIntLog = do
     }
 
 instance State IntState IO Command where
+    -- canApplyEntry :: s -> Index -> e -> m Bool
+    canApplyEntry _ _ _ = return True
 
-    applyEntry initial cmd = do
+    applyEntry initial _ cmd = do
         let Right icmd = decode cmd
         applyIntCommand initial icmd
 
@@ -125,16 +128,25 @@ instance Log IntLog IO RaftLogEntry (RaftState IntState) where
 
 type IntServer = RaftServer IntLog IntState
 
+deriving instance Show IntServer
+
 type IntRaft = Raft IntLog IntState
 
 mkIntServer :: Configuration -> Name -> Int -> IO IntServer
-mkIntServer cfg sid initial = do
+mkIntServer cfg name initial = do
     log <- mkIntLog
     return RaftServer {
-        serverName = sid,
+        serverName = name,
         serverLog = log,
+        serverState = mkRaftState (IntState initial) cfg name
+        {-
         serverState = RaftState {
-            serverConfiguration = cfg,
-            serverData = IntState initial
+            raftStateCurrentTerm = 0,
+            raftStateName = name,
+            raftStateConfigurationIndex = Nothing,
+            raftStateConfiguration = cfg,
+            raftStateMembers = mkMembers cfg initialRaftTime,
+            raftStateData = IntState initial
             }
+        -}
     }

@@ -54,7 +54,7 @@ testNewLog = do
 testEmptyLog :: Assertion
 testEmptyLog = do
     log <- mkLog :: IO IntLog
-    let val = RaftState (newConfiguration []) (IntState 0)
+    let val = mkRaftState (IntState 0) (mkConfiguration []) "server1"
     (_,chg) <- commitEntries log 0 val
     assertEqual "Empty log should leave value unchanged" val chg
 
@@ -63,13 +63,13 @@ testSingleAction = do
     log <- mkLog :: IO IntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2)]
     log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2)]
-    let val = RaftState (newConfiguration []) (IntState 1)
+    let val = mkRaftState (IntState 1) (mkConfiguration []) "server1"
     entries <- fetchEntries log1 0 1
     let lastIndex = lastAppended log1
     assertEqual "Log index should be 0" 0 lastIndex
     assertBool "Log should not be empty" (not $ null entries)
-    (log2,RaftState _ chg) <- commitEntries log1 0 val
-    assertEqual "Committing simple log did not match expected value" (IntState 3) chg
+    (log2,rs) <- commitEntries log1 0 val
+    assertEqual "Committing simple log did not match expected value" (IntState 3) (raftStateData rs)
     let committedIndex = lastCommitted log2
     assertEqual "Committed index sould be equal to lastIndex" lastIndex committedIndex
 
@@ -78,13 +78,13 @@ testDoubleAction = do
     log <- mkLog :: IO IntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2),IntLogEntry (Multiply 5)]
     log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2),RaftLogEntry 1 $ Cmd $ encode (Multiply 5)]
-    let val = RaftState (newConfiguration []) (IntState 1)
+    let val = mkRaftState (IntState 1) (mkConfiguration []) "server1"
     entries <- fetchEntries log1 0 2
     assertBool "Log should not be empty" (not $ null entries)
     assertEqual "Length incorrect" 2 (length entries)
     let lastIndex = lastAppended log1
     assertEqual "Appended index incorrect" 1 lastIndex
-    (log2,RaftState _ chg) <- commitEntries log1 1 val
-    assertEqual "Committing simple log did not match expected value" (IntState 15) chg
+    (log2,rs) <- commitEntries log1 1 val
+    assertEqual "Committing simple log did not match expected value" (IntState 15) (raftStateData rs)
     let committedIndex = lastCommitted log2
     assertEqual "Committed index sould be equal to lastIndex" lastIndex committedIndex

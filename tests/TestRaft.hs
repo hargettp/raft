@@ -47,6 +47,8 @@ import Test.Framework
 import Test.HUnit
 import Test.Framework.Providers.HUnit
 
+import Text.Printf
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -56,11 +58,16 @@ _log = "test.raft"
 tests :: [Test.Framework.Test]
 tests = [
     testCase "3cluster" test3Cluster,
+    testCase "3cluster-1nonparticipant" test3Cluster1NonParticipant,
+    testCase "3cluster-add1" test3ClusterAdd1,
     testCase "3cluster-stability" test3ClusterStability,
+    testCase "3cluster-1nonparticipant-stability" test3Cluster1NonParticipantStability,
     testCase "5cluster" test5Cluster,
     testCase "5cluster-stability" test5ClusterStability,
     testCase "client" testClient,
     testCase "consistency" testConsistency,
+    testCase "2consistency" test2Consistency,
+    testCase "3consistency" test3Consistency,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
     testCase "clientPerformAction" testClientPerformAction,
@@ -84,6 +91,39 @@ test3Cluster = do
         _ <- checkForConsistency (1 :: Integer) leader vRafts
         return ()
 
+test3Cluster1NonParticipant :: Assertion
+test3Cluster1NonParticipant = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers1NonParticipant transport cfg "server4" $ \vRafts -> do
+        let mRafts = take 3 vRafts
+        leader <- waitForLeader 5 (1 :: Integer) mRafts
+        leaders <- allLeaders mRafts
+        infoM _log $ "Leaders are " ++ (show leaders)
+        _ <- checkForConsistency (1 :: Integer) leader mRafts
+        return ()
+
+test3ClusterAdd1 :: Assertion
+test3ClusterAdd1 = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers1NonParticipant transport cfg "server4" $ \vRafts -> do
+        let mRafts = take 3 vRafts
+        leader <- waitForLeader 5 (1 :: Integer) mRafts
+        leaders <- allLeaders mRafts
+        infoM _log $ "Leaders are " ++ (show leaders)
+        _ <- checkForConsistency (1 :: Integer) leader mRafts
+        withClient transport "client1" cfg $ \client -> do
+            RaftTime _ clientIndex <- performAction client $ AddParticipants ["server4"]
+            assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
+            _ <- waitForLeader 5 (2 :: Integer) vRafts
+            newLeaders <- allLeaders vRafts
+            infoM _log $ printf "New leaders are %v" (show newLeaders)
+            newLastCommitted <- allLastCommitted vRafts
+            infoM _log $ printf "Last committed indexes are %v" (show newLastCommitted)
+            _ <- checkForConsistency (1 :: Integer) leader vRafts
+            return ()
+
 test3ClusterStability :: Assertion
 test3ClusterStability = do
     transport <- newMemoryTransport
@@ -93,6 +133,18 @@ test3ClusterStability = do
         _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         pause >> pause
         _ <- checkForConsistency (2 :: Integer) firstLeader vRafts
+        return ()
+
+test3Cluster1NonParticipantStability :: Assertion
+test3Cluster1NonParticipantStability = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers1NonParticipant  transport cfg "server4" $ \vRafts -> do
+        let mRafts = take 3 vRafts
+        firstLeader <- waitForLeader 5 (1 :: Integer) mRafts
+        _ <- checkForConsistency (1 :: Integer) firstLeader mRafts
+        pause >> pause
+        _ <- checkForConsistency (2 :: Integer) firstLeader mRafts
         return ()
 
 test5Cluster :: Assertion
@@ -148,11 +200,58 @@ testConsistency = do
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 1
-                                assertBool "Client index should be 0" $ clientIndex == 0
+                                assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
                                 assertBool "" $ all (== (IntState 1)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
+
+test2Consistency :: Assertion
+test2Consistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Multiply 5
+                                assertBool  (printf "Client index should be 1: %v" (show clientIndex)) $ clientIndex == 1
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 15)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
+
+test3Consistency :: Assertion
+test3Consistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Subtract 2
+                                assertBool  (printf "Client index should be 2: %v" (show clientIndex)) $ clientIndex == 2
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 13)) states)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -264,13 +363,13 @@ testWithClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
-checkForConsistency :: Integer -> Maybe Name -> [TVar (RaftContext IntLog IntState)] -> IO (Maybe Name)
+checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntState] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
-        results = map (serverData . serverState)  servers
+    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
+        results = map (raftStateData . serverState)  servers
     -- all results should be equal--and since we didn't perform any commands, should still be 0
     assertBool ((show run) ++ ": All results should be equal") $ all (== (IntState 0)) results
     assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
@@ -284,12 +383,12 @@ checkForConsistency run possibleLeader vRafts = do
                         then return leader
                         else return Nothing
 
-waitForLeader :: Integer -> Integer -> [TVar (RaftContext IntLog IntState)] -> IO (Maybe Name)
+waitForLeader :: Integer -> Integer -> [Raft IntLog IntState] -> IO (Maybe Name)
 waitForLeader maxCount attempt vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
         leader = leaders !! 0
     if maxCount <= 0
         then do
@@ -300,28 +399,36 @@ waitForLeader maxCount attempt vRafts = do
             if (leader /= Nothing) && (all (== leader) leaders)
                 then do
                     let msg = "After " ++ (show attempt) ++ " rounds, the leader is " ++ (show leader)
-                    if attempt > 2
+                    if attempt > 3
                         then warningM _log msg
                         else infoM _log msg
                     return leader
                 else
                     waitForLeader (maxCount - 1) (attempt + 1) vRafts
 
-allLeaders :: [TVar (RaftContext IntLog IntState)] -> IO [Maybe Name]
+allLeaders :: [Raft IntLog IntState] -> IO [Maybe Name]
 allLeaders vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . serverConfiguration . serverState) servers
+    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
     return leaders
 
-allStates :: [TVar (RaftContext IntLog IntState)] -> IO [IntState]
+allStates :: [Raft IntLog IntState] -> IO [IntState]
 allStates vRafts = do
     servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar vRaft
+        raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let states = map (serverData . serverState) servers
+    let states = map (raftStateData . serverState) servers
     return states
+
+allLastCommitted :: [Raft IntLog IntState] -> IO [Index]
+allLastCommitted vRafts = do
+    servers <- mapM (\vRaft -> do
+        raft <- atomically $ readTVar $ raftContext vRaft
+        return $ raftServer raft) vRafts
+    let committed = map (lastCommitted . serverLog) servers
+    return committed
 
 withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
 withClient transport name cfg fn = do
@@ -331,7 +438,7 @@ withClient transport name cfg fn = do
     fn client
 
 newTestConfiguration :: [Name] -> Configuration
-newTestConfiguration members = (newConfiguration members) {configurationTimeouts = testTimeouts}
+newTestConfiguration members = (mkConfiguration members) {configurationTimeouts = testTimeouts}
 
 pause :: IO ()
 pause = threadDelay serverTimeout
@@ -363,7 +470,15 @@ with3Servers transport cfg fn =
     let names = clusterMembers cfg
     in withServer transport cfg (names !! 0) $ \vRaft1 ->
         withServer transport cfg (names !! 1) $ \vRaft2 ->
-        withServer transport cfg (names !! 2) $ \vRaft3 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3]
+        withServer transport cfg (names !! 2) $ \vRaft3 -> fn $ [vRaft1,vRaft2,vRaft3]
+
+with3Servers1NonParticipant :: Transport -> Configuration -> Name -> ([IntRaft] -> IO ()) -> IO ()
+with3Servers1NonParticipant transport cfg name fn = 
+    let names = clusterMembers cfg
+    in withServer transport cfg (names !! 0) $ \vRaft1 ->
+        withServer transport cfg (names !! 1) $ \vRaft2 ->
+        withServer transport cfg (names !! 2) $ \vRaft3 -> 
+        withServer transport cfg name $ \vRaft4 -> fn $ [vRaft1, vRaft2, vRaft3, vRaft4]
 
 with5Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
 with5Servers transport cfg fn = 

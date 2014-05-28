@@ -17,8 +17,12 @@
 module Control.Consensus.Raft.Configuration (
     -- * Configuration
     Configuration(..),
-    newConfiguration,
+    mkConfiguration,
+    clusterTimeouts,
+    isJointConfiguration,
     clusterLeader,
+    isClusterParticipant,
+    isClusterMember,
     clusterMembers,
     clusterMembersOnly,
     clusterParticipants,
@@ -66,22 +70,40 @@ data Configuration = Configuration {
 
 instance Serialize Configuration
 
-newConfiguration :: [Name] -> Configuration
-newConfiguration participants = Configuration {
+mkConfiguration :: [Name] -> Configuration
+mkConfiguration participants = Configuration {
     configurationLeader = Nothing,
     configurationParticipants = S.fromList participants,
     configurationObservers = S.empty,
     configurationTimeouts = defaultTimeouts
 }
 
+clusterTimeouts :: Configuration -> Timeouts
+clusterTimeouts (Configuration _ _ _ cfgTimeouts) = cfgTimeouts
+clusterTimeouts (JointConfiguration _ jointNew) = clusterTimeouts jointNew
+
+isJointConfiguration :: Configuration -> Bool
+isJointConfiguration (Configuration _ _ _ _) = False
+isJointConfiguration (JointConfiguration _ _) = True
+
 clusterLeader :: Configuration -> Maybe Name
 clusterLeader Configuration {configurationLeader = leaderId} = leaderId
 clusterLeader (JointConfiguration _ configuration) = clusterLeader configuration
+
+isClusterParticipant :: Name -> Configuration -> Bool
+isClusterParticipant name (Configuration _ participants _ _) = S.member name participants
+isClusterParticipant name (JointConfiguration jointOld jointNew) = 
+    (isClusterParticipant name jointOld) || (isClusterParticipant name jointNew)
 
 clusterMembers :: Configuration -> [Name]
 clusterMembers (Configuration _ participants observers _) = S.toList $ S.union participants observers
 clusterMembers (JointConfiguration jointOld jointNew) =
     S.toList $ S.union (S.fromList $ clusterMembers jointOld) (S.fromList $ clusterMembers jointNew)
+
+isClusterMember :: Name -> Configuration -> Bool
+isClusterMember name (Configuration _ participants observers _) = S.member name participants || S.member name observers
+isClusterMember name (JointConfiguration jointOld jointNew) = 
+    (isClusterMember name jointOld) || (isClusterMember name jointNew)
 
 clusterParticipants :: Configuration -> [Name]
 clusterParticipants (Configuration _ participants _ _) = (S.toList participants)
@@ -111,6 +133,12 @@ removeClusterParticipants (JointConfiguration jointOld jointNew) participants = 
     jointNewConfiguration = removeClusterParticipants jointNew participants
     }
 
+setClusterParticipants :: Configuration -> [Name] -> Configuration
+setClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
+    configurationParticipants = S.fromList participants
+    }
+setClusterParticipants (JointConfiguration _ jointNew) participants = setClusterParticipants jointNew participants
+
 --------------------------------------------------------------------------------
 -- Actions
 --------------------------------------------------------------------------------
@@ -120,6 +148,13 @@ Apply the 'Action' to the 'Configuration', if it is a configuration change; othe
 leave the configuration unchanged
 -}
 applyConfigurationAction :: Configuration -> Action -> Configuration
-applyConfigurationAction initial (AddParticipants participants) = addClusterParticipants initial participants
-applyConfigurationAction initial (RemoveParticipants participants) = removeClusterParticipants initial participants
+-- Joint config
+applyConfigurationAction (JointConfiguration jointOld jointNew) (AddParticipants participants) = JointConfiguration jointOld $ addClusterParticipants jointNew participants
+applyConfigurationAction (JointConfiguration jointOld jointNew) (RemoveParticipants participants) = JointConfiguration jointOld $ removeClusterParticipants jointNew participants
+applyConfigurationAction (JointConfiguration _ jointNew) (SetParticipants participants) = setClusterParticipants jointNew participants
+applyConfigurationAction (JointConfiguration jointOld jointNew) _ = JointConfiguration jointOld jointNew
+-- Single config
+applyConfigurationAction initial (AddParticipants participants) = JointConfiguration initial $ addClusterParticipants initial participants
+applyConfigurationAction initial (RemoveParticipants participants) = JointConfiguration initial $ removeClusterParticipants initial participants
+applyConfigurationAction initial (SetParticipants participants) = setClusterParticipants initial participants
 applyConfigurationAction initial _ = initial
