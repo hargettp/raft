@@ -200,7 +200,7 @@ doVote vRaft = do
                 then return (raft,False,"Candidate term too old")
                 else do
                     modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftTerm (rvCandidateTerm req) oldRaft
-                    case raftLastCandidate raft of
+                    case raftStateLastCandidate $ serverState $ raftServer raft of
                         Just candidate -> do
                             if (candidate == rvCandidate req)
                                 then return (raft,True,"Candidate already seen")
