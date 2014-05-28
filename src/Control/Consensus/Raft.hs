@@ -68,20 +68,20 @@ _log = "raft.consensus"
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-withConsensus :: (RaftLog l v) => Endpoint -> RaftServer l v -> (Raft l v -> IO ()) -> IO ()
-withConsensus endpoint server fn = do
+withConsensus :: (RaftLog l v) => Endpoint -> Name -> RaftServer l v -> (Raft l v -> IO ()) -> IO ()
+withConsensus endpoint name server fn = do
     vRaft <- atomically $ mkRaft endpoint server
     withAsync (run vRaft)
         (\_ -> fn vRaft)
     where
         run vRaft = do
-            infoM _log $ printf "Starting server %v" $ serverName server
+            infoM _log $ printf "Starting server %v" name
             finally (catch (participate vRaft)
                         (\e -> case e of
                                 ThreadKilled -> return ()
-                                _ -> debugM _log $ printf "%v encountered error: %v" (serverName server) (show (e :: AsyncException))))
+                                _ -> debugM _log $ printf "%v encountered error: %v" name (show (e :: AsyncException))))
                 (do
-                    infoM _log $ printf "Stopped server %v" $ serverName server )
+                    infoM _log $ printf "Stopped server %v" name)
         participate vRaft = do
             follow vRaft
             won <- volunteer vRaft
@@ -117,7 +117,7 @@ doFollow vRaft = do
     let endpoint = raftEndpoint initialRaft
         server = raftServer initialRaft
         cfg = raftStateConfiguration $ serverState server
-        name = serverName server
+        name = raftName initialRaft
         leading = (Just name) == (clusterLeader cfg)
     maybeCommitted <- onAppendEntries endpoint cfg name $ \req -> do
         debugM _log $ printf "Server %v received %v" name (show req)
@@ -189,7 +189,7 @@ doVote vRaft = do
     let endpoint = raftEndpoint initialRaft
         server = raftServer initialRaft
         cfg = raftStateConfiguration $ serverState server
-        name = serverName server
+        name = raftName initialRaft
         leading = (Just name) == (clusterLeader cfg)
     votedForCandidate <- onRequestVote endpoint name $ \req -> do
         debugM _log $ printf "Server %v received vote request from %v" name (show $ rvCandidate req)

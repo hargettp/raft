@@ -92,7 +92,6 @@ mkRaft endpoint server = do
 A minimal 'Server' capable of participating in the Raft algorithm.
 -}
 data RaftServer l v = (RaftLog l v) => RaftServer {
-    serverName :: Name,
     serverLog :: l,
     serverState :: RaftState v
 }
@@ -112,7 +111,7 @@ raftCurrentTerm :: (RaftLog l v) => RaftContext l v -> Term
 raftCurrentTerm raft = raftStateCurrentTerm $ serverState $ raftServer raft
 
 raftName :: (RaftLog l v) => RaftContext l v -> Name
-raftName raft = serverName $ raftServer raft
+raftName raft = raftStateName $ serverState $ raftServer raft
 
 {-|
 Update the current term in a new 'RaftContext'

@@ -136,17 +136,6 @@ mkIntServer :: Configuration -> Name -> Int -> IO IntServer
 mkIntServer cfg name initial = do
     log <- mkIntLog
     return RaftServer {
-        serverName = name,
         serverLog = log,
         serverState = mkRaftState (IntState initial) cfg name
-        {-
-        serverState = RaftState {
-            raftStateCurrentTerm = 0,
-            raftStateName = name,
-            raftStateConfigurationIndex = Nothing,
-            raftStateConfiguration = cfg,
-            raftStateMembers = mkMembers cfg initialRaftTime,
-            raftStateData = IntState initial
-            }
-        -}
     }

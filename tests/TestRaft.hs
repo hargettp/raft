@@ -462,7 +462,7 @@ withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     server <- mkIntServer cfg name 0
-    finally (withConsensus endpoint server fn)
+    finally (withConsensus endpoint name server fn)
         (unbindEndpoint_ endpoint name)
 
 with3Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
