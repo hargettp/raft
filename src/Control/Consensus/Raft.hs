@@ -352,7 +352,10 @@ append vRaft actions clients = do
                         Cmd _ -> oldRaft
                         -- precommitting configuration changes
                         cfgAction -> let newCfg = applyConfigurationAction (raftStateConfiguration $ serverState $ raftServer oldRaft) cfgAction
-                                         in setRaftConfiguration newCfg $ setRaftConfigurationIndex (Just nextIndex) oldRaft
+                                         in setRaftConfiguration newCfg $
+                                                setRaftConfigurationIndex (case newCfg of 
+                                                    JointConfiguration _ _ -> Just nextIndex
+                                                    _ -> Nothing) oldRaft
                 writeMailbox clients (lastAppended newLog,reply)
             infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()

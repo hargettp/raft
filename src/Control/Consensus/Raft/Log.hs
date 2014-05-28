@@ -275,6 +275,5 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
                 let cfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
                 infoM _log $ printf "New configuration is %v" (show cfg)
                 return $ oldRaftState {
-                    raftStateConfigurationIndex = Just index,
                     raftStateConfiguration = cfg
                 }
