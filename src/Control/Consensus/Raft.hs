@@ -31,6 +31,7 @@ module Control.Consensus.Raft (
 
 -- local imports
 
+import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Client
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Protocol
@@ -345,17 +346,18 @@ append vRaft actions clients = do
             let oldLog = serverLog $ raftServer raft
                 term = raftCurrentTerm raft
                 nextIndex = (lastAppended oldLog) + 1
-            newLog <- appendEntries oldLog nextIndex [RaftLogEntry term action]
+                revisedAction = case action of
+                    Cmd _ -> action
+                    cfgAction -> SetConfiguration $ applyConfigurationAction (raftStateConfiguration $ serverState $ raftServer raft) cfgAction
+            newLog <- appendEntries oldLog nextIndex [RaftLogEntry term revisedAction]
             atomically $ do
                 modifyTVar (raftContext vRaft) $ \oldRaft ->
-                    setRaftLog newLog $ case action of
-                        Cmd _ -> oldRaft
-                        -- precommitting configuration changes
-                        cfgAction -> let newCfg = applyConfigurationAction (raftStateConfiguration $ serverState $ raftServer oldRaft) cfgAction
-                                         in setRaftConfiguration newCfg $
-                                                setRaftConfigurationIndex (case newCfg of 
+                    setRaftLog newLog $ case revisedAction of
+                        SetConfiguration newCfg -> setRaftConfiguration newCfg $
+                                                setRaftConfigurationIndex (case newCfg of
                                                     JointConfiguration _ _ -> Just nextIndex
                                                     _ -> Nothing) oldRaft
+                        _ -> oldRaft
                 writeMailbox clients (lastAppended newLog,reply)
             infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()
@@ -401,11 +403,11 @@ commit vRaft clients = do
                 Just cfgIndex ->
                     if lastCommitted newLog >= cfgIndex
                         then do
-                            let newParticipants = case raftStateConfiguration newState of
-                                    JointConfiguration _ jointNew -> clusterParticipants jointNew
-                                    newCfg -> clusterParticipants newCfg
+                            let revisedCfg = case raftStateConfiguration newState of
+                                    JointConfiguration _ jointNew -> jointNew
+                                    newCfg -> newCfg
                             revisedLog <- appendEntries newLog ((lastAppended newLog) + 1)
-                                    [RaftLogEntry (raftStateCurrentTerm newState) (SetParticipants newParticipants)]
+                                    [RaftLogEntry (raftStateCurrentTerm newState) (SetConfiguration revisedCfg)]
                             let revisedState = newState {raftStateConfigurationIndex = Nothing}
                             return (revisedLog,revisedState)
                         else return (newLog,newState)

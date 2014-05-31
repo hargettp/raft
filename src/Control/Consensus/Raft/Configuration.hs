@@ -28,7 +28,7 @@ module Control.Consensus.Raft.Configuration (
     clusterParticipants,
     addClusterParticipants,
     removeClusterParticipants,
-    applyConfigurationAction,
+    setClusterParticipants
 ) where
 
 -- local imports
@@ -139,22 +139,3 @@ setClusterParticipants cfg@(Configuration _ _ _ _) participants = cfg {
     }
 setClusterParticipants (JointConfiguration _ jointNew) participants = setClusterParticipants jointNew participants
 
---------------------------------------------------------------------------------
--- Actions
---------------------------------------------------------------------------------
-
-{-|
-Apply the 'Action' to the 'Configuration', if it is a configuration change; otherwise,
-leave the configuration unchanged
--}
-applyConfigurationAction :: Configuration -> Action -> Configuration
--- Joint config
-applyConfigurationAction (JointConfiguration jointOld jointNew) (AddParticipants participants) = JointConfiguration jointOld $ addClusterParticipants jointNew participants
-applyConfigurationAction (JointConfiguration jointOld jointNew) (RemoveParticipants participants) = JointConfiguration jointOld $ removeClusterParticipants jointNew participants
-applyConfigurationAction (JointConfiguration _ jointNew) (SetParticipants participants) = setClusterParticipants jointNew participants
-applyConfigurationAction (JointConfiguration jointOld jointNew) _ = JointConfiguration jointOld jointNew
--- Single config
-applyConfigurationAction initial (AddParticipants participants) = JointConfiguration initial $ addClusterParticipants initial participants
-applyConfigurationAction initial (RemoveParticipants participants) = JointConfiguration initial $ removeClusterParticipants initial participants
-applyConfigurationAction initial (SetParticipants participants) = setClusterParticipants initial participants
-applyConfigurationAction initial _ = initial
