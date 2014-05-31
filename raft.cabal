@@ -27,6 +27,7 @@ library
   exposed-modules:     
                        Control.Consensus.Log,
                        Control.Consensus.Raft, 
+                       Control.Consensus.Raft.Actions,
                        Control.Consensus.Raft.Client,
                        Control.Consensus.Raft.Configuration,
                        Control.Consensus.Raft.Log,
