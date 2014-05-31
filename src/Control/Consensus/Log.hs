@@ -93,26 +93,7 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     if the calling application is well-behaved.
     -}
     commitEntries :: l -> Index -> s -> m (l,s)
-    commitEntries initialLog index initialState = do
-        let committed = lastCommitted initialLog
-            count = index - committed
-        if count > 0
-            then do
-                let nextCommitted = committed + 1
-                uncommitted <- fetchEntries initialLog nextCommitted count
-                commit initialLog initialState nextCommitted uncommitted 
-            else return (initialLog,initialState)
-        where
-            commit oldLog oldState _ [] = do
-                return (oldLog,oldState)
-            commit oldLog oldState commitIndex (entry:rest) = do
-                can <- canApplyEntry oldState commitIndex entry
-                if can
-                    then do
-                        newLog <- commitEntry oldLog commitIndex entry
-                        newState <- applyEntry oldState commitIndex entry
-                        commit newLog newState (commitIndex + 1)  rest
-                    else return (oldLog,oldState)
+    commitEntries = defaultCommitEntries
 
     {-|
     Records a single entry in the log as committed; note that
@@ -121,15 +102,7 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     -}
     commitEntry :: l -> Index -> e -> m l
 
-{-
-An 'Index' is a logical offset into a 'Log'.
-
-While the exact interpretation of the 'Index' is up to the 'Log'
-implementation, by convention the first 'Index' in a log is  @0@.
--}
-type Index = Int
-
-{-
+{-|
 'Log's operate on 'State': that is, when committing, the log applies each
 entry to the current 'State', and produces a new 'State'. Application of each
 entry operates within a chosen 'Monad', so implementers are free to implement 
@@ -138,6 +111,41 @@ entry operates within a chosen 'Monad', so implementers are free to implement
 class (Monad m) => State s m e where
     canApplyEntry :: s -> Index -> e -> m Bool
     applyEntry :: s -> Index -> e -> m s
+
+{-|
+An 'Index' is a logical offset into a 'Log'.
+
+While the exact interpretation of the 'Index' is up to the 'Log'
+implementation, by convention the first 'Index' in a log is  @0@.
+-}
+type Index = Int
+
+{-|
+Default of implementation of `commitEntries`, which fetches all uncommitted entries
+with `fetchEntries`, then commits them one by one with `commitEntry` until either the
+result of `canApplyEntry` is false, or all entries are committed.
+-}
+defaultCommitEntries :: (Monad m,State s m e, Log l m e s) => l -> Index -> s -> m (l,s)
+defaultCommitEntries initialLog index initialState = do
+    let committed = lastCommitted initialLog
+        count = index - committed
+    if count > 0
+        then do
+            let nextCommitted = committed + 1
+            uncommitted <- fetchEntries initialLog nextCommitted count
+            commit initialLog initialState nextCommitted uncommitted 
+        else return (initialLog,initialState)
+    where
+        commit oldLog oldState _ [] = do
+            return (oldLog,oldState)
+        commit oldLog oldState commitIndex (entry:rest) = do
+            can <- canApplyEntry oldState commitIndex entry
+            if can
+                then do
+                    newLog <- commitEntry oldLog commitIndex entry
+                    newState <- applyEntry oldState commitIndex entry
+                    commit newLog newState (commitIndex + 1)  rest
+                else return (oldLog,oldState)
 
 {-|
 Return all entries from the 'Log''s 'lastCommitted' time up to and
