@@ -25,12 +25,7 @@ module Control.Consensus.Raft.Types (
     Timeouts(..),
     defaultTimeouts,
     timeouts,
-    electionTimeout,
-    -- * Actions
-    Action(..),
-    Command,
-    isCommandAction,
-    isConfigurationAction
+    electionTimeout
 
 ) where
 
@@ -40,12 +35,9 @@ import Control.Consensus.Log
 
 -- external imports
 
-import qualified Data.ByteString as B
 import Data.Serialize
 
 import GHC.Generics
-
-import Network.Endpoints
 
 import qualified System.Random as R
 
@@ -121,26 +113,3 @@ Return a new election timeout
 -}
 electionTimeout :: Timeouts -> IO Timeout
 electionTimeout outs = R.randomRIO $ timeoutElectionRange outs
-
-data Action = AddParticipants [Name]
-    | RemoveParticipants [Name]
-    | SetParticipants [Name]
-    | Cmd Command
-    deriving (Eq,Show,Generic)
-
-instance Serialize Action
-
-{-|
-Commands are the specific operations applied to 'Control.Consensus.Log.State's
-to transform them into a new 'Control.Consensus.Log.State'. They are represented
-here in their completely typeless form as a 'B.ByteString', because that's the
-most concrete description of them.
--}
-type Command = B.ByteString
-
-isCommandAction :: Action -> Bool
-isCommandAction (Cmd _) = True
-isCommandAction _ = False
-
-isConfigurationAction :: Action -> Bool
-isConfigurationAction = not . isCommandAction

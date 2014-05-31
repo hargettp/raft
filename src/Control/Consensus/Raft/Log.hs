@@ -46,6 +46,7 @@ module Control.Consensus.Raft.Log (
 -- local imports
 
 import Control.Consensus.Log
+import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
@@ -56,7 +57,6 @@ import Control.Concurrent.STM
 
 import qualified Data.Map as M
 import Data.Serialize
-import qualified Data.Set as S
 
 import GHC.Generics
 
@@ -84,10 +84,8 @@ data Raft l v = (RaftLog l v,Serialize v) => Raft {raftContext :: TVar (RaftCont
 mkRaft :: (RaftLog l v) => Endpoint -> RaftServer l v -> STM (Raft l v)
 mkRaft endpoint server = do
     ctx <- newTVar $ RaftContext {
-        raftLastCandidate = Nothing,
         raftEndpoint = endpoint,
-        raftServer = server,
-        raftConfigurationObservers = S.empty
+        raftServer = server
     }
     return $ Raft ctx
 
@@ -95,7 +93,6 @@ mkRaft endpoint server = do
 A minimal 'Server' capable of participating in the Raft algorithm.
 -}
 data RaftServer l v = (RaftLog l v) => RaftServer {
-    serverName :: Name,
     serverLog :: l,
     serverState :: RaftState v
 }
@@ -107,17 +104,15 @@ on a 'RaftServer' for customizing the use of the algorithm to a
 specific application.
 -}
 data RaftContext l v = (RaftLog l v) => RaftContext {
-    raftLastCandidate :: Maybe Name,
     raftEndpoint :: Endpoint,
-    raftServer :: RaftServer l v,
-    raftConfigurationObservers :: S.Set Name
+    raftServer :: RaftServer l v
 }
 
 raftCurrentTerm :: (RaftLog l v) => RaftContext l v -> Term
 raftCurrentTerm raft = raftStateCurrentTerm $ serverState $ raftServer raft
 
 raftName :: (RaftLog l v) => RaftContext l v -> Name
-raftName raft = serverName $ raftServer raft
+raftName raft = raftStateName $ serverState $ raftServer raft
 
 {-|
 Update the current term in a new 'RaftContext'
@@ -157,8 +152,12 @@ Update the last candidate in a new 'RaftContext'
 -}
 setRaftLastCandidate :: Maybe Name -> RaftContext l v -> RaftContext l v
 setRaftLastCandidate candidate raft = raft {
-    raftLastCandidate = candidate
-}
+                raftServer = (raftServer raft) {
+                    serverState = (serverState $ raftServer raft) {
+                        raftStateLastCandidate = candidate
+                        }
+                    }
+                }
 
 {-|
 Update the 'RaftState' in a new 'RaftContext' to specify a new leader
@@ -225,6 +224,7 @@ instance Serialize RaftLogEntry
 
 data RaftState v = (Eq v, Show v) => RaftState {
     raftStateCurrentTerm :: Term,
+    raftStateLastCandidate :: Maybe Name,
     raftStateName :: Name,
     raftStateConfigurationIndex :: Maybe Index,
     raftStateConfiguration :: Configuration,
@@ -235,6 +235,7 @@ data RaftState v = (Eq v, Show v) => RaftState {
 mkRaftState :: (Eq v, Show v) => v -> Configuration -> Name -> RaftState v
 mkRaftState initialData cfg name = RaftState {
     raftStateCurrentTerm = 0,
+    raftStateLastCandidate = Nothing,
     raftStateName = name,
     raftStateConfigurationIndex = Nothing,
     raftStateConfiguration = cfg,

@@ -20,6 +20,7 @@ module TestRaft (
 -- local imports
 
 import Control.Consensus.Raft
+import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Protocol
@@ -462,7 +463,7 @@ withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     server <- mkIntServer cfg name 0
-    finally (withConsensus endpoint server fn)
+    finally (withConsensus endpoint name server fn)
         (unbindEndpoint_ endpoint name)
 
 with3Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
