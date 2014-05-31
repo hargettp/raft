@@ -121,7 +121,7 @@ implementation, by convention the first 'Index' in a log is  @0@.
 type Index = Int
 
 {-|
-Default of implementation of `commitEntries`, which fetches all uncommitted entries
+Default implementation of `commitEntries`, which fetches all uncommitted entries
 with `fetchEntries`, then commits them one by one with `commitEntry` until either the
 result of `canApplyEntry` is false, or all entries are committed.
 -}
