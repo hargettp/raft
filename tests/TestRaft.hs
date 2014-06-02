@@ -369,8 +369,8 @@ checkForConsistency run possibleLeader vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
-        results = map (raftStateData . serverState)  servers
+    let leaders = map (clusterLeader . raftStateConfiguration . raftServerState) servers
+        results = map (raftStateData . raftServerState)  servers
     -- all results should be equal--and since we didn't perform any commands, should still be 0
     assertBool ((show run) ++ ": All results should be equal") $ all (== (IntState 0)) results
     assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
@@ -389,7 +389,7 @@ waitForLeader maxCount attempt vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
+    let leaders = map (clusterLeader . raftStateConfiguration . raftServerState) servers
         leader = leaders !! 0
     if maxCount <= 0
         then do
@@ -412,7 +412,7 @@ allLeaders vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . serverState) servers
+    let leaders = map (clusterLeader . raftStateConfiguration . raftServerState) servers
     return leaders
 
 allStates :: [Raft IntLog IntState] -> IO [IntState]
@@ -420,7 +420,7 @@ allStates vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let states = map (raftStateData . serverState) servers
+    let states = map (raftStateData . raftServerState) servers
     return states
 
 allLastCommitted :: [Raft IntLog IntState] -> IO [Index]
@@ -428,7 +428,7 @@ allLastCommitted vRafts = do
     servers <- mapM (\vRaft -> do
         raft <- atomically $ readTVar $ raftContext vRaft
         return $ raftServer raft) vRafts
-    let committed = map (lastCommitted . serverLog) servers
+    let committed = map (lastCommitted . raftServerLog) servers
     return committed
 
 withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
