@@ -22,7 +22,8 @@ module Control.Consensus.Log (
     Index,
     Log(..),
     fetchLatestEntries,
-    State(..)
+    State(..),
+    Server(..)
 
 ) where
 
@@ -111,6 +112,9 @@ entry operates within a chosen 'Monad', so implementers are free to implement
 class (Monad m) => State s m e where
     canApplyEntry :: s -> Index -> e -> m Bool
     applyEntry :: s -> Index -> e -> m s
+
+class (Monad m,State v m e,Log l m e v) => Server s l m e v where
+    checkpoint :: s -> l -> v -> m (l, v)
 
 {-|
 An 'Index' is a logical offset into a 'Log'.
