@@ -21,6 +21,7 @@ module Control.Consensus.Log (
 
     Index,
     Log(..),
+    defaultCommitEntries,
     fetchLatestEntries,
     State(..),
     Server(..)
