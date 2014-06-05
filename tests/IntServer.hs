@@ -127,6 +127,8 @@ instance Log IntLog IO RaftLogEntry (RaftState IntState) where
                 }
         return newLog
 
+    checkpoint oldLog oldState = return (oldLog,oldState)
+
 type IntServer = RaftServer IntLog IntState
 
 deriving instance Show IntServer

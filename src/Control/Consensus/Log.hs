@@ -23,8 +23,7 @@ module Control.Consensus.Log (
     Log(..),
     defaultCommitEntries,
     fetchLatestEntries,
-    State(..),
-    Server(..)
+    State(..)
 
 ) where
 
@@ -104,6 +103,14 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     -}
     commitEntry :: l -> Index -> e -> m l
 
+    {-|
+    Snapshot the current `Log` and `State` such that in the event of failure,
+    both will be recovered from this point.  Typically, implementors
+    will record the condition of log and state on permanent storage,
+    and factory for the log will restore it.
+    -}
+    checkpoint :: l -> s -> m (l, s)
+
 {-|
 'Log's operate on 'State': that is, when committing, the log applies each
 entry to the current 'State', and produces a new 'State'. Application of each
@@ -113,9 +120,6 @@ entry operates within a chosen 'Monad', so implementers are free to implement
 class (Monad m) => State s m e where
     canApplyEntry :: s -> Index -> e -> m Bool
     applyEntry :: s -> Index -> e -> m s
-
-class (Monad m,State v m e,Log l m e v) => Server s l m e v where
-    checkpoint :: s -> l -> v -> m (l, v)
 
 {-|
 An 'Index' is a logical offset into a 'Log'.

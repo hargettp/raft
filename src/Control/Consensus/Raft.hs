@@ -157,9 +157,10 @@ doFollow vRaft = do
                 then do
                     raft <- atomically $ readTVar (raftContext vRaft)
                     (log,state) <- commitEntries (raftServerLog $ raftServer $ raft) (logIndex $ committed) (raftServerState $ raftServer $ raft)
+                    (checkpointedLog,checkpointedState) <- checkpoint log state
                     atomically $ do
                         modifyTVar (raftContext vRaft) $ \oldRaft ->
-                                setRaftLog log $ setRaftState state oldRaft
+                                setRaftLog checkpointedLog $ setRaftState checkpointedState oldRaft
                 else return ()
             if leading && (name /= leader)
                 -- someone else is sending append entries, so step down
@@ -344,20 +345,26 @@ append vRaft actions clients = do
         Nothing -> return ()
         Just (action,reply) -> do
             let oldLog = raftServerLog $ raftServer raft
+                oldState = raftServerState $ raftServer raft
                 term = raftCurrentTerm raft
                 nextIndex = (lastAppended oldLog) + 1
                 revisedAction = case action of
                     Cmd _ -> action
-                    cfgAction -> SetConfiguration $ applyConfigurationAction (raftStateConfiguration $ raftServerState $ raftServer raft) cfgAction
+                    cfgAction -> SetConfiguration $ applyConfigurationAction (raftStateConfiguration oldState) cfgAction
             newLog <- appendEntries oldLog nextIndex [RaftLogEntry term revisedAction]
+            (revisedLog,revisedState) <- case revisedAction of
+                SetConfiguration newCfg -> do
+                    let newState = oldState {
+                        raftStateConfiguration = newCfg,
+                        raftStateConfigurationIndex = case newCfg of
+                            JointConfiguration _ _ -> Just nextIndex
+                            _ -> Nothing
+                        }
+                    checkpoint newLog newState
+                _ -> return (newLog,oldState)
             atomically $ do
                 modifyTVar (raftContext vRaft) $ \oldRaft ->
-                    setRaftLog newLog $ case revisedAction of
-                        SetConfiguration newCfg -> setRaftConfiguration newCfg $
-                                                setRaftConfigurationIndex (case newCfg of
-                                                    JointConfiguration _ _ -> Just nextIndex
-                                                    _ -> Nothing) oldRaft
-                        _ -> oldRaft
+                    setRaftLog revisedLog $ setRaftState revisedState oldRaft
                 writeMailbox clients (lastAppended newLog,reply)
             infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()
@@ -396,7 +403,8 @@ commit vRaft clients = do
                                      in if count > 0
                                         then do
                                             infoM _log $ printf "Committing at time %v" (show time)
-                                            commitEntries initialLog newAppendedIndex (raftServerState $ raftServer $ newRaft)
+                                            (log,state) <- commitEntries initialLog newAppendedIndex (raftServerState $ raftServer $ newRaft)
+                                            checkpoint log state
                                         else return (initialLog,(raftServerState $ raftServer $ newRaft))
             (revisedLog,revisedState) <- case raftStateConfigurationIndex newState of
                 Nothing -> return (newLog,newState)
