@@ -102,8 +102,6 @@ instance State IntState IO Command where
 
 instance Log IntLog IO RaftLogEntry (RaftState IntState) where
 
-    mkLog = mkIntLog
-
     lastCommitted log = logIndex $ numberLogLastCommitted log
 
     lastAppended log = logIndex $ numberLogLastAppended log

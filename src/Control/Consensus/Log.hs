@@ -63,10 +63,6 @@ to optimize commiting batches of entires may choose to override this method.
 -}
 class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     {-|
-    Create a new 'Log'.
-    -}
-    mkLog :: m l
-    {-|
     'Index' of last committed entry in the 'Log'.
     -}
     lastCommitted :: l -> Index
@@ -104,10 +100,11 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     commitEntry :: l -> Index -> e -> m l
 
     {-|
-    Snapshot the current `Log` and `State` such that in the event of failure,
-    both will be recovered from this point.  Typically, implementors
-    will record the condition of log and state on permanent storage,
-    and factory for the log will restore it.
+    Snapshot the current `Log` and `State` to persistant storage
+    such that in the event of failure, both will be recovered from
+    this point.  Typically, implementors will record the condition
+    of log and state on permanent storage, and the factory for the
+    log will restore it.
     -}
     checkpoint :: l -> s -> m (l, s)
 

@@ -48,19 +48,19 @@ tests = [
 
 testNewLog :: Assertion
 testNewLog = do
-    _ <- mkLog :: IO IntLog
+    _ <- mkIntLog
     return ()
 
 testEmptyLog :: Assertion
 testEmptyLog = do
-    log <- mkLog :: IO IntLog
+    log <- mkIntLog
     let val = mkRaftState (IntState 0) (mkConfiguration []) "server1"
     (_,chg) <- commitEntries log 0 val
     assertEqual "Empty log should leave value unchanged" val chg
 
 testSingleAction :: Assertion
 testSingleAction = do
-    log <- mkLog :: IO IntLog
+    log <- mkIntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2)]
     log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2)]
     let val = mkRaftState (IntState 1) (mkConfiguration []) "server1"
@@ -75,7 +75,7 @@ testSingleAction = do
 
 testDoubleAction :: Assertion
 testDoubleAction = do
-    log <- mkLog :: IO IntLog
+    log <- mkIntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2),IntLogEntry (Multiply 5)]
     log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2),RaftLogEntry 1 $ Cmd $ encode (Multiply 5)]
     let val = mkRaftState (IntState 1) (mkConfiguration []) "server1"
