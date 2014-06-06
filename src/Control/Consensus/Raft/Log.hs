@@ -24,7 +24,6 @@ module Control.Consensus.Raft.Log (
     raftCurrentTerm,
     raftName,
     RaftContext(..),
-    RaftServer(..),
     RaftLog(..),
     RaftLogEntry(..),
     RaftState(..),
@@ -79,26 +78,20 @@ specific application.
 -}
 data RaftContext l v = (RaftLog l v) => RaftContext {
     raftEndpoint :: Endpoint,
-    raftServer :: RaftServer l v
+    raftLog :: l,
+    raftState :: RaftState v
 }
 
 data Raft l v = (RaftLog l v,Serialize v) => Raft {raftContext :: TVar (RaftContext l v)}
 
-mkRaft :: (RaftLog l v) => Endpoint -> RaftServer l v -> STM (Raft l v)
-mkRaft endpoint server = do
+mkRaft :: (RaftLog l v) => Endpoint -> l -> RaftState v -> STM (Raft l v)
+mkRaft endpoint initialLog initialState = do
     ctx <- newTVar $ RaftContext {
         raftEndpoint = endpoint,
-        raftServer = server
+        raftLog = initialLog,
+        raftState = initialState
     }
     return $ Raft ctx
-
-{-|
-A minimal 'Server' capable of participating in the Raft algorithm.
--}
-data RaftServer l v = (RaftLog l v) => RaftServer {
-    raftServerLog :: l,
-    raftServerState :: RaftState v
-}
 
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
@@ -173,37 +166,33 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
                 }
 
 raftCurrentTerm :: (RaftLog l v) => RaftContext l v -> Term
-raftCurrentTerm raft = raftStateCurrentTerm $ raftServerState $ raftServer raft
+raftCurrentTerm raft = raftStateCurrentTerm $ raftState raft
 
 raftName :: (RaftLog l v) => RaftContext l v -> Name
-raftName raft = raftStateName $ raftServerState $ raftServer raft
+raftName raft = raftStateName $ raftState raft
 
 {-|
 Update the current term in a new 'RaftContext'
 -}
 setRaftTerm :: Term -> RaftContext l v -> RaftContext l v
 setRaftTerm term raft = raft {
-    raftServer = (raftServer raft) {
-        raftServerState = (raftServerState $ raftServer raft) {
+        raftState = (raftState raft) {
             raftStateCurrentTerm = term
+            }
         }
-    }
-}
 
 {-|
 Update the current term in a new 'RaftContext'
 -}
 setRaftMembers :: Members -> RaftContext l v -> RaftContext l v
 setRaftMembers members raft = raft {
-    raftServer = (raftServer raft) {
-        raftServerState = (raftServerState $ raftServer raft) {
+        raftState = (raftState raft) {
             raftStateMembers = members
+            }
         }
-    }
-}
 
 raftMembers :: (RaftLog l v) => RaftContext l v -> Members
-raftMembers raft = raftStateMembers $ raftServerState $ raftServer raft
+raftMembers raft = raftStateMembers $ raftState raft
 
 raftSafeAppendedTerm :: (RaftLog l v) => RaftContext l v -> Term
 raftSafeAppendedTerm raft = 
@@ -216,33 +205,29 @@ Update the last candidate in a new 'RaftContext'
 -}
 setRaftLastCandidate :: Maybe Name -> RaftContext l v -> RaftContext l v
 setRaftLastCandidate candidate raft = raft {
-                raftServer = (raftServer raft) {
-                    raftServerState = (raftServerState $ raftServer raft) {
+                    raftState = (raftState raft) {
                         raftStateLastCandidate = candidate
                         }
                     }
-                }
 
 {-|
 Update the 'RaftState' in a new 'RaftContext' to specify a new leader
 -}
 setRaftLeader :: Maybe Name -> RaftContext l v -> RaftContext l v
 setRaftLeader leader raft = 
-    let cfg = raftStateConfiguration $ raftServerState $ raftServer raft
+    let cfg = raftStateConfiguration $ raftState raft
         in case cfg of
             Configuration _ _ _ _ -> raft {
-                raftServer = (raftServer raft) {
-                    raftServerState = (raftServerState $ raftServer raft) {
+                    raftState = (raftState raft) {
                         raftStateConfiguration = cfg {
                             configurationLeader = leader
-                        }}}
+                        }}
                 }
             JointConfiguration _ jointNew -> raft {
-                raftServer = (raftServer raft) {
-                    raftServerState = (raftServerState $ raftServer raft) {
+                    raftState = (raftState raft) {
                         raftStateConfiguration = jointNew {
                             configurationLeader = leader
-                        }}}
+                        }}
                 }
 
 isRaftLeader :: (RaftLog l v) => RaftContext l v -> Bool
@@ -250,31 +235,27 @@ isRaftLeader raft = (Just $ raftName raft) == (clusterLeader $ raftConfiguration
 
 setRaftLog :: (RaftLog l v) => l -> RaftContext l v -> RaftContext l v
 setRaftLog rlog raft = raft {
-    raftServer = (raftServer raft) {
-            raftServerLog = rlog
+        raftLog = rlog
         }
-    }
 
 setRaftConfiguration :: (RaftLog l v) => Configuration -> RaftContext l v -> RaftContext l v
 setRaftConfiguration cfg raft =
-    let newState = (raftServerState $ raftServer raft) {
+    let newState = (raftState raft) {
         raftStateConfiguration = cfg
         }
         in setRaftState newState raft
 
 raftConfiguration :: (RaftLog l v) => RaftContext l v -> Configuration 
-raftConfiguration raft = raftStateConfiguration $ raftServerState $ raftServer raft
+raftConfiguration raft = raftStateConfiguration $ raftState raft
 
 setRaftConfigurationIndex :: (RaftLog l v) => Maybe Index -> RaftContext l v -> RaftContext l v
 setRaftConfigurationIndex index raft =
-    let newState = (raftServerState $ raftServer raft) {
+    let newState = (raftState raft) {
         raftStateConfigurationIndex = index
         }
         in setRaftState newState raft
 
 setRaftState :: (RaftLog l v) => RaftState v -> RaftContext l v -> RaftContext l v
 setRaftState state raft = raft {
-    raftServer = (raftServer raft) {
-            raftServerState = state
+        raftState = state
         }
-    }

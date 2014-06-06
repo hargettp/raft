@@ -24,16 +24,13 @@ module IntServer (
     IntLogEntry(..),
     IntLog,
     IntState(..),
-    mkIntLog,
-    IntServer,
-    mkIntServer
+    mkIntLog
 ) where
 
 -- local imports
 
 import Control.Consensus.Log
 import Control.Consensus.Raft.Actions
-import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Types
 
@@ -44,8 +41,6 @@ import Prelude hiding (log)
 import Data.Serialize
 
 import GHC.Generics
-
-import Network.Endpoints
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -127,16 +122,4 @@ instance Log IntLog IO RaftLogEntry (RaftState IntState) where
 
     checkpoint oldLog oldState = return (oldLog,oldState)
 
-type IntServer = RaftServer IntLog IntState
-
-deriving instance Show IntServer
-
 type IntRaft = Raft IntLog IntState
-
-mkIntServer :: Configuration -> Name -> Int -> IO IntServer
-mkIntServer cfg name initial = do
-    log <- mkIntLog
-    return RaftServer {
-        raftServerLog = log,
-        raftServerState = mkRaftState (IntState initial) cfg name
-    }

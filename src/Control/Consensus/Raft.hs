@@ -69,9 +69,9 @@ _log = "raft.consensus"
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-withConsensus :: (RaftLog l v) => Endpoint -> Name -> RaftServer l v -> (Raft l v -> IO ()) -> IO ()
-withConsensus endpoint name server fn = do
-    vRaft <- atomically $ mkRaft endpoint server
+withConsensus :: (RaftLog l v) => Endpoint -> Name -> l -> RaftState v -> (Raft l v -> IO ()) -> IO ()
+withConsensus endpoint name initialLog initialState fn = do
+    vRaft <- atomically $ mkRaft endpoint initialLog initialState
     withAsync (run vRaft)
         (\_ -> fn vRaft)
     where
@@ -116,8 +116,7 @@ doFollow vRaft = do
     -- we sent earlier?
     initialRaft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint initialRaft
-        server = raftServer initialRaft
-        cfg = raftStateConfiguration $ raftServerState server
+        cfg = raftStateConfiguration $ raftState initialRaft
         name = raftName initialRaft
         leading = (Just name) == (clusterLeader cfg)
     maybeCommitted <- onAppendEntries endpoint cfg name $ \req -> do
@@ -133,12 +132,12 @@ doFollow vRaft = do
                             setRaftTerm (aeLeaderTerm req)
                                 $ setRaftLeader (Just $ aeLeader req)
                                 $ setRaftLastCandidate Nothing oldRaft
-                    let log = raftServerLog $ raftServer raft
+                    let log = raftLog raft
                     -- check previous entry for consistency
                     return ( (lastAppendedTime log) == (aePreviousTime req),raft)
         if valid && not leading
             then do
-                let log = raftServerLog $ raftServer raft
+                let log = raftLog raft
                     index = (1 + (logIndex $ aePreviousTime req))
                 newLog <- appendEntries log index (aeEntries req)
                 updatedRaft <- atomically $ do
@@ -156,7 +155,7 @@ doFollow vRaft = do
             if not leading
                 then do
                     raft <- atomically $ readTVar (raftContext vRaft)
-                    (log,state) <- commitEntries (raftServerLog $ raftServer $ raft) (logIndex $ committed) (raftServerState $ raftServer $ raft)
+                    (log,state) <- commitEntries (raftLog raft) (logIndex $ committed) (raftState raft)
                     (checkpointedLog,checkpointedState) <- checkpoint log state
                     atomically $ do
                         modifyTVar (raftContext vRaft) $ \oldRaft ->
@@ -176,7 +175,7 @@ preCommitConfigurationChange vRaft (entry:entries) = do
         Cmd _ -> return ()
         action -> do
             raft <- readTVar (raftContext vRaft)
-            let oldRaftState = raftServerState $ raftServer raft
+            let oldRaftState = raftState raft
                 newCfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
                 newRaft = setRaftConfiguration newCfg raft
             writeTVar (raftContext vRaft) newRaft
@@ -189,20 +188,19 @@ doVote :: (RaftLog l v) => Raft l v -> IO ()
 doVote vRaft = do
     initialRaft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint initialRaft
-        server = raftServer initialRaft
-        cfg = raftStateConfiguration $ raftServerState server
+        cfg = raftStateConfiguration $ raftState initialRaft
         name = raftName initialRaft
         leading = (Just name) == (clusterLeader cfg)
     votedForCandidate <- onRequestVote endpoint name $ \req -> do
         debugM _log $ printf "Server %v received vote request from %v" name (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
             raft <- readTVar (raftContext vRaft)
-            let log = raftServerLog $ raftServer raft
+            let log = raftLog raft
             if (rvCandidateTerm req) < (raftCurrentTerm raft)
                 then return (raft,False,"Candidate term too old")
                 else do
                     modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftTerm (rvCandidateTerm req) oldRaft
-                    case raftStateLastCandidate $ raftServerState $ raftServer raft of
+                    case raftStateLastCandidate $ raftState raft of
                         Just candidate -> do
                             if (candidate == rvCandidate req)
                                 then return (raft,True,"Candidate already seen")
@@ -233,7 +231,7 @@ volunteer vRaft = do
     participant <- atomically $ do
         raft <- readTVar $ raftContext vRaft
         let name = raftName raft
-            cfg = raftStateConfiguration $ raftServerState $ raftServer raft 
+            cfg = raftStateConfiguration $ raftState raft
         return $ isClusterParticipant name cfg
     -- this allows us to have raft servers that are up and running,
     -- but they will just patiently wait until they are a participant
@@ -254,12 +252,12 @@ doVolunteer vRaft = do
                 $ setRaftLastCandidate Nothing oldRaft
         readTVar (raftContext vRaft)
     let candidate = raftName raft
-        cfg = raftStateConfiguration $ raftServerState $ raftServer raft
+        cfg = raftStateConfiguration $ raftState raft
         endpoint = raftEndpoint raft
         members = clusterMembers cfg
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
-        log = raftServerLog $ raftServer raft
+        log = raftLog raft
         RaftTime lastTerm lastIndex = lastAppendedTime log
     infoM _log $ printf "Server %v volunteering in term %v" candidate (show $ raftCurrentTerm raft)
     debugM _log $ printf "Server %v is soliciting votes from %v" candidate (show members)
@@ -280,8 +278,8 @@ lead vRaft = do
     raft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft -> do
             let name = raftName oldRaft
-                cfg = raftStateConfiguration $ raftServerState $ raftServer oldRaft
-                members = mkMembers cfg $ lastCommittedTime $ raftServerLog $ raftServer oldRaft
+                cfg = raftStateConfiguration $ raftState oldRaft
+                members = mkMembers cfg $ lastCommittedTime $ raftLog oldRaft
             setRaftTerm ((raftCurrentTerm oldRaft) + 1)
                 $ setRaftLeader (Just name)
                 $ setRaftLastCandidate Nothing 
@@ -310,7 +308,7 @@ doPulse vRaft actions = do
             then writeMailbox actions Nothing
             else return ()
         return raft
-    let cfg = raftStateConfiguration $ raftServerState $ raftServer raft
+    let cfg = raftStateConfiguration $ raftState raft
     threadDelay $ timeoutPulse $ clusterTimeouts cfg
     doPulse vRaft actions
 
@@ -344,8 +342,8 @@ append vRaft actions clients = do
     case maybeAction of
         Nothing -> return ()
         Just (action,reply) -> do
-            let oldLog = raftServerLog $ raftServer raft
-                oldState = raftServerState $ raftServer raft
+            let oldLog = raftLog raft
+                oldState = raftState raft
                 term = raftCurrentTerm raft
                 nextIndex = (lastAppended oldLog) + 1
                 revisedAction = case action of
@@ -372,13 +370,13 @@ append vRaft actions clients = do
 commit :: (RaftLog l v) => Raft l v -> Clients -> IO ()
 commit vRaft clients = do
     raft <- atomically $ readTVar (raftContext vRaft)
-    let initialLog = raftServerLog $ raftServer raft
+    let initialLog = raftLog raft
         leader = raftName raft
         endpoint = raftEndpoint raft
         cs = newCallSite endpoint leader
         term = raftCurrentTerm raft
         prevTime = lastCommittedTime initialLog
-        cfg = raftStateConfiguration $ raftServerState $ raftServer raft
+        cfg = raftStateConfiguration $ raftState raft
     (commitIndex,entries) <- gatherLatestEntries initialLog
     infoM _log $ printf "Synchronizing from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
@@ -403,9 +401,9 @@ commit vRaft clients = do
                                      in if count > 0
                                         then do
                                             infoM _log $ printf "Committing at time %v" (show time)
-                                            (log,state) <- commitEntries initialLog newAppendedIndex (raftServerState $ raftServer $ newRaft)
+                                            (log,state) <- commitEntries initialLog newAppendedIndex (raftState newRaft)
                                             checkpoint log state
-                                        else return (initialLog,(raftServerState $ raftServer $ newRaft))
+                                        else return (initialLog,(raftState newRaft))
             (revisedLog,revisedState) <- case raftStateConfigurationIndex newState of
                 Nothing -> return (newLog,newState)
                 Just cfgIndex ->
@@ -486,10 +484,10 @@ doRedirect vRaft = do
 mkResult :: (RaftLog l v) => Bool -> RaftContext l v -> MemberResult
 mkResult success raft = MemberResult {
     memberActionSuccess = success,
-    memberLeader = clusterLeader $ raftStateConfiguration $ raftServerState $ raftServer raft,
+    memberLeader = clusterLeader $ raftStateConfiguration $ raftState raft,
     memberCurrentTerm = raftCurrentTerm raft,
-    memberLastAppended = lastAppendedTime $ raftServerLog $ raftServer raft,
-    memberLastCommitted = lastCommittedTime $ raftServerLog $ raftServer raft
+    memberLastAppended = lastAppendedTime $ raftLog raft,
+    memberLastCommitted = lastCommittedTime $ raftLog raft
 }
 
 raceAll_ :: [IO ()] -> IO ()

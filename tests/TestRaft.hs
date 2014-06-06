@@ -366,11 +366,9 @@ testWithClientPerformAction = do
 
 checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntState] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
-    servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar $ raftContext vRaft
-        return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . raftServerState) servers
-        results = map (raftStateData . raftServerState)  servers
+    rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
+    let leaders = map (clusterLeader . raftStateConfiguration . raftState) rafts
+        results = map (raftStateData . raftState) rafts
     -- all results should be equal--and since we didn't perform any commands, should still be 0
     assertBool ((show run) ++ ": All results should be equal") $ all (== (IntState 0)) results
     assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
@@ -386,10 +384,8 @@ checkForConsistency run possibleLeader vRafts = do
 
 waitForLeader :: Integer -> Integer -> [Raft IntLog IntState] -> IO (Maybe Name)
 waitForLeader maxCount attempt vRafts = do
-    servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar $ raftContext vRaft
-        return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . raftServerState) servers
+    rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
+    let leaders = map (clusterLeader . raftStateConfiguration . raftState) rafts
         leader = leaders !! 0
     if maxCount <= 0
         then do
@@ -409,26 +405,20 @@ waitForLeader maxCount attempt vRafts = do
 
 allLeaders :: [Raft IntLog IntState] -> IO [Maybe Name]
 allLeaders vRafts = do
-    servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar $ raftContext vRaft
-        return $ raftServer raft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . raftServerState) servers
+    rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
+    let leaders = map (clusterLeader . raftStateConfiguration . raftState) rafts
     return leaders
 
 allStates :: [Raft IntLog IntState] -> IO [IntState]
 allStates vRafts = do
-    servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar $ raftContext vRaft
-        return $ raftServer raft) vRafts
-    let states = map (raftStateData . raftServerState) servers
+    rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
+    let states = map (raftStateData . raftState) rafts
     return states
 
 allLastCommitted :: [Raft IntLog IntState] -> IO [Index]
 allLastCommitted vRafts = do
-    servers <- mapM (\vRaft -> do
-        raft <- atomically $ readTVar $ raftContext vRaft
-        return $ raftServer raft) vRafts
-    let committed = map (lastCommitted . raftServerLog) servers
+    rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
+    let committed = map (lastCommitted . raftLog) rafts
     return committed
 
 withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
@@ -462,8 +452,9 @@ withServer :: Transport -> Configuration -> Name -> (IntRaft -> IO ()) -> IO ()
 withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
-    server <- mkIntServer cfg name 0
-    finally (withConsensus endpoint name server fn)
+    initialLog <- mkIntLog
+    let initialState = mkRaftState (IntState 0) cfg name
+    finally (withConsensus endpoint name initialLog initialState fn)
         (unbindEndpoint_ endpoint name)
 
 with3Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
