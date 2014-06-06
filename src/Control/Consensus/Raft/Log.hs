@@ -73,11 +73,14 @@ _log :: String
 _log = "raft.consensus"
 
 {-|
-A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
+Encapsulates the state necessary for the Raft algorithm, depending
+on a 'RaftServer' for customizing the use of the algorithm to a 
+specific application.
 -}
-class (Serialize v,Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
-    lastAppendedTime :: l -> RaftTime
-    lastCommittedTime :: l -> RaftTime
+data RaftContext l v = (RaftLog l v) => RaftContext {
+    raftEndpoint :: Endpoint,
+    raftServer :: RaftServer l v
+}
 
 data Raft l v = (RaftLog l v,Serialize v) => Raft {raftContext :: TVar (RaftContext l v)}
 
@@ -97,16 +100,77 @@ data RaftServer l v = (RaftLog l v) => RaftServer {
     raftServerState :: RaftState v
 }
 
-
 {-|
-Encapsulates the state necessary for the Raft algorithm, depending
-on a 'RaftServer' for customizing the use of the algorithm to a 
-specific application.
+A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-data RaftContext l v = (RaftLog l v) => RaftContext {
-    raftEndpoint :: Endpoint,
-    raftServer :: RaftServer l v
+class (Serialize v,Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
+    lastAppendedTime :: l -> RaftTime
+    lastCommittedTime :: l -> RaftTime
+
+
+data RaftState v = (Eq v, Show v) => RaftState {
+    raftStateCurrentTerm :: Term,
+    raftStateLastCandidate :: Maybe Name,
+    raftStateName :: Name,
+    raftStateConfigurationIndex :: Maybe Index,
+    raftStateConfiguration :: Configuration,
+    raftStateMembers :: Members,
+    raftStateData :: v
 }
+
+mkRaftState :: (Eq v, Show v) => v -> Configuration -> Name -> RaftState v
+mkRaftState initialData cfg name = RaftState {
+    raftStateCurrentTerm = 0,
+    raftStateLastCandidate = Nothing,
+    raftStateName = name,
+    raftStateConfigurationIndex = Nothing,
+    raftStateConfiguration = cfg,
+    raftStateMembers = mkMembers cfg initialRaftTime,
+    raftStateData = initialData
+}
+
+deriving instance Eq (RaftState v)
+deriving instance Show (RaftState v)
+
+data RaftLogEntry =  RaftLogEntry {
+    entryTerm :: Term,
+    entryAction :: Action
+} deriving (Eq,Show,Generic)
+
+instance Serialize RaftLogEntry
+
+instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
+    canApplyEntry oldRaftState index entry = do
+        let members = raftStateMembers oldRaftState
+            cfg = raftStateConfiguration oldRaftState
+            term = membersSafeAppendedTerm members cfg
+            currentTerm = raftStateCurrentTerm oldRaftState
+            leader = (Just $ raftStateName oldRaftState) == (clusterLeader cfg)
+        infoM _log $ printf "%v: Safe term for members %v is %v" currentTerm (show $ M.map (logTerm . memberLogLastAppended) members) term
+        if leader
+                then if term /= raftStateCurrentTerm oldRaftState
+                    then return False
+                    else canApply $ entryAction entry
+                else canApply $ entryAction entry
+        where
+            canApply (Cmd cmd) = do
+                let oldData = raftStateData oldRaftState
+                canApplyEntry oldData index cmd
+            -- TODO check configuration cases
+            canApply _ = return True
+
+    applyEntry oldRaftState index entry = applyAction $ entryAction entry
+        where
+            applyAction (Cmd cmd) = do
+                let oldData = raftStateData oldRaftState
+                newData <- applyEntry oldData index cmd
+                return $ oldRaftState {raftStateData = newData}
+            applyAction action = do
+                let cfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
+                infoM _log $ printf "New configuration is %v" (show cfg)
+                return $ oldRaftState {
+                    raftStateConfiguration = cfg
+                }
 
 raftCurrentTerm :: (RaftLog l v) => RaftContext l v -> Term
 raftCurrentTerm raft = raftStateCurrentTerm $ raftServerState $ raftServer raft
@@ -214,67 +278,3 @@ setRaftState state raft = raft {
             raftServerState = state
         }
     }
-
-data RaftLogEntry =  RaftLogEntry {
-    entryTerm :: Term,
-    entryAction :: Action
-} deriving (Eq,Show,Generic)
-
-instance Serialize RaftLogEntry
-
-data RaftState v = (Eq v, Show v) => RaftState {
-    raftStateCurrentTerm :: Term,
-    raftStateLastCandidate :: Maybe Name,
-    raftStateName :: Name,
-    raftStateConfigurationIndex :: Maybe Index,
-    raftStateConfiguration :: Configuration,
-    raftStateMembers :: Members,
-    raftStateData :: v
-}
-
-mkRaftState :: (Eq v, Show v) => v -> Configuration -> Name -> RaftState v
-mkRaftState initialData cfg name = RaftState {
-    raftStateCurrentTerm = 0,
-    raftStateLastCandidate = Nothing,
-    raftStateName = name,
-    raftStateConfigurationIndex = Nothing,
-    raftStateConfiguration = cfg,
-    raftStateMembers = mkMembers cfg initialRaftTime,
-    raftStateData = initialData
-}
-
-deriving instance Eq (RaftState v)
-deriving instance Show (RaftState v)
-
-instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
-    canApplyEntry oldRaftState index entry = do
-        let members = raftStateMembers oldRaftState
-            cfg = raftStateConfiguration oldRaftState
-            term = membersSafeAppendedTerm members cfg
-            currentTerm = raftStateCurrentTerm oldRaftState
-            leader = (Just $ raftStateName oldRaftState) == (clusterLeader cfg)
-        infoM _log $ printf "%v: Safe term for members %v is %v" currentTerm (show $ M.map (logTerm . memberLogLastAppended) members) term
-        if leader
-                then if term /= raftStateCurrentTerm oldRaftState
-                    then return False
-                    else canApply $ entryAction entry
-                else canApply $ entryAction entry
-        where
-            canApply (Cmd cmd) = do
-                let oldData = raftStateData oldRaftState
-                canApplyEntry oldData index cmd
-            -- TODO check configuration cases
-            canApply _ = return True
-
-    applyEntry oldRaftState index entry = applyAction $ entryAction entry
-        where
-            applyAction (Cmd cmd) = do
-                let oldData = raftStateData oldRaftState
-                newData <- applyEntry oldData index cmd
-                return $ oldRaftState {raftStateData = newData}
-            applyAction action = do
-                let cfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
-                infoM _log $ printf "New configuration is %v" (show cfg)
-                return $ oldRaftState {
-                    raftStateConfiguration = cfg
-                }
