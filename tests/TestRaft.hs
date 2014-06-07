@@ -452,8 +452,8 @@ withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     initialLog <- mkIntLog
-    let initialState = IntState 0
-    finally (withConsensus endpoint cfg name initialLog initialState fn)
+    let initialState = mkRaftState (IntState 0) cfg name
+    finally (withConsensus endpoint name initialLog initialState fn)
         (unbindEndpoint_ endpoint name)
 
 with3Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()

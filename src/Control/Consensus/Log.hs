@@ -102,9 +102,7 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     {-|
     Snapshot the current `Log` and `State` to persistant storage
     such that in the event of failure, both will be recovered from
-    this point.  Typically, implementors will record the condition
-    of log and state on permanent storage, and the factory for the
-    log will restore it.
+    this point.
     -}
     checkpoint :: l -> s -> m (l, s)
 
