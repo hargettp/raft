@@ -96,7 +96,7 @@ mkRaft endpoint initialLog initialState = do
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (Serialize v,Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
+class (Eq v,Show v,Serialize v,Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
     lastAppendedTime :: l -> RaftTime
     lastCommittedTime :: l -> RaftTime
 
