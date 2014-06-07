@@ -384,9 +384,8 @@ checkForConsistency run possibleLeader vRafts = do
 
 waitForLeader :: Integer -> Integer -> [Raft IntLog IntState] -> IO (Maybe Name)
 waitForLeader maxCount attempt vRafts = do
-    rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . raftState) rafts
-        leader = leaders !! 0
+    leaders <- allLeaders vRafts
+    let leader = leaders !! 0
     if maxCount <= 0
         then do
             assertBool ("No leader found after " ++ (show (attempt - 1)) ++ " rounds: " ++ (show leaders)) False
