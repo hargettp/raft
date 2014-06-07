@@ -69,9 +69,10 @@ _log = "raft.consensus"
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-withConsensus :: (RaftLog l v) => Endpoint -> Name -> l -> RaftState v -> (Raft l v -> IO ()) -> IO ()
-withConsensus endpoint name initialLog initialState fn = do
-    vRaft <- atomically $ mkRaft endpoint initialLog initialState
+withConsensus :: (RaftLog l v,Eq v,Show v) => Endpoint -> Configuration -> Name -> l -> v -> (Raft l v -> IO ()) -> IO ()
+withConsensus endpoint cfg name initialLog initialData fn = do
+    let initialRaftState = mkRaftState initialData cfg name
+    vRaft <- atomically $ mkRaft endpoint initialLog initialRaftState
     withAsync (run vRaft)
         (\_ -> fn vRaft)
     where
