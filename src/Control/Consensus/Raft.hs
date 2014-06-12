@@ -107,18 +107,15 @@ follow vRaft = do
                 doRedirect vRaft]
 
 {-|
-    Wait for 'AppendEntries' requests and process them, commit new changes
-    as necessary, and stop when no heartbeat received.
+    As a follower, wait for 'AppendEntries' requests and process them, 
+    commit new changes as necessary, and stop when no heartbeat received.
 -}
 doFollow :: (RaftLog l v) => Raft l v -> IO ()
 doFollow vRaft = do
-    -- TOD what if we're the leader and we're processing a message
-    -- we sent earlier?
     initialRaft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint initialRaft
         cfg = raftStateConfiguration $ raftState initialRaft
         name = raftName initialRaft
-        leading = (Just name) == (clusterLeader cfg)
     maybeLeader <- onAppendEntries endpoint cfg name $ \req -> do
         debugM _log $ printf "Server %v received %v" name (show req)
         infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
@@ -127,7 +124,6 @@ doFollow vRaft = do
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
                 then return (False,raft)
                 else do
-                    -- first update raft state
                     modifyTVar (raftContext vRaft) $ \oldRaft ->
                             setRaftTerm (aeLeaderTerm req)
                                 $ setRaftLeader (Just $ aeLeader req)
@@ -135,7 +131,7 @@ doFollow vRaft = do
                     let log = raftLog raft
                     -- check previous entry for consistency
                     return ( (lastAppendedTime log) == (aePreviousTime req),raft)
-        if valid && not leading
+        if valid
             then do
                 let log = raftLog raft
                     index = (1 + (logIndex $ aePreviousTime req))
@@ -154,20 +150,15 @@ doFollow vRaft = do
             else return $ mkResult valid raft
     case maybeLeader of
         -- we did hear a message before the timeout, and we have a committed time
-        Just leader ->  do
-            -- what is good here is that since there is only 1 doFollow
-            -- async, we can count on all of these invocations to commit as
-            -- being synchronous, so no additional locking required
-            if leading && (name /= leader)
-                -- someone else is sending append entries, so step down
-                then return ()
-                else doFollow vRaft
+        Just _ ->  do
+            -- keep following
+            doFollow vRaft
         -- we heard no message before timeout
         Nothing -> return ()
 
 preCommitConfigurationChange :: (RaftLog l v) => Raft l v -> [RaftLogEntry] -> STM ()
 preCommitConfigurationChange _ [] = return ()
-preCommitConfigurationChange vRaft (entry:entries) = do
+preCommitConfigurationChange vRaft (entry:_) = do
     case entryAction entry of
         Cmd _ -> return ()
         action -> do
@@ -176,7 +167,8 @@ preCommitConfigurationChange vRaft (entry:entries) = do
                 newCfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
                 newRaft = setRaftConfiguration newCfg raft
             writeTVar (raftContext vRaft) newRaft
-    preCommitConfigurationChange vRaft entries
+    -- we don't need to recurse, because we expect the configuration change at the beginning
+    -- preCommitConfigurationChange vRaft entries
 
 {-|
 Wait for request vote requests and process them
@@ -289,7 +281,7 @@ lead vRaft = do
     infoM _log $ printf "Server %v leading in term %v" name (show term)
     raceAll_ $ [doPulse vRaft actions,
                 doVote vRaft,
-                doFollow vRaft,
+                doRespond vRaft,
                 doServe vRaft actions,
                 doPerform vRaft actions clients]
 
@@ -308,6 +300,44 @@ doPulse vRaft actions = do
     let cfg = raftStateConfiguration $ raftState raft
     threadDelay $ timeoutPulse $ clusterTimeouts cfg
     doPulse vRaft actions
+
+{-|
+    As a leader, wait for 'AppendEntries' requests and process them, 
+    commit new changes as necessary, and stop when no heartbeat received.
+-}
+doRespond :: (RaftLog l v) => Raft l v -> IO ()
+doRespond vRaft = do
+    initialRaft <- atomically $ readTVar (raftContext vRaft)
+    let endpoint = raftEndpoint initialRaft
+        cfg = raftStateConfiguration $ raftState initialRaft
+        name = raftName initialRaft
+    maybeLeader <- onAppendEntries endpoint cfg name $ \req -> do
+        debugM _log $ printf "Server %v received %v" name (show req)
+        infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
+        (valid, raft) <- atomically $ do
+            raft <-readTVar (raftContext vRaft)
+            if (aeLeaderTerm req) < (raftCurrentTerm raft)
+                then return (False,raft)
+                else do
+                    -- first update raft state
+                    modifyTVar (raftContext vRaft) $ \oldRaft ->
+                            setRaftTerm (aeLeaderTerm req)
+                                $ setRaftLeader (Just $ aeLeader req)
+                                $ setRaftLastCandidate Nothing oldRaft
+                    let log = raftLog raft
+                    -- check previous entry for consistency
+                    return ( (lastAppendedTime log) == (aePreviousTime req),raft)
+        return $ mkResult valid raft
+    case maybeLeader of
+        -- we did hear a message before the timeout, and we have a committed time
+        Just leader ->  do
+            if name /= leader
+                -- someone else is sending append entries, so step down
+                then return ()
+                -- keep following
+                else doRespond vRaft
+        -- we heard no message before timeout
+        Nothing -> return ()
 
 doServe :: (RaftLog l v) => Raft l v -> Actions -> IO ()
 doServe vRaft actions = do
