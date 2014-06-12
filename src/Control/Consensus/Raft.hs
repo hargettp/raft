@@ -119,7 +119,7 @@ doFollow vRaft = do
         cfg = raftStateConfiguration $ raftState initialRaft
         name = raftName initialRaft
         leading = (Just name) == (clusterLeader cfg)
-    maybeCommitted <- onAppendEntries endpoint cfg name $ \req -> do
+    maybeLeader <- onAppendEntries endpoint cfg name $ \req -> do
         debugM _log $ printf "Server %v received %v" name (show req)
         infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
         (valid, raft) <- atomically $ do
@@ -144,23 +144,20 @@ doFollow vRaft = do
                         preCommitConfigurationChange vRaft (aeEntries req)
                         modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
                         readTVar (raftContext vRaft)
-                return $ mkResult valid updatedRaft
+                (committedLog,committedState) <- commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
+                (checkpointedLog,checkpointedState) <- checkpoint committedLog committedState
+                checkpointedRaft <- atomically $ do
+                    modifyTVar (raftContext vRaft) $ \oldRaft ->
+                            setRaftLog checkpointedLog $ setRaftState checkpointedState oldRaft
+                    readTVar (raftContext vRaft)
+                return $ mkResult valid checkpointedRaft
             else return $ mkResult valid raft
-    case maybeCommitted of
+    case maybeLeader of
         -- we did hear a message before the timeout, and we have a committed time
-        Just (leader,committed) ->  do
+        Just leader ->  do
             -- what is good here is that since there is only 1 doFollow
             -- async, we can count on all of these invocations to commit as
             -- being synchronous, so no additional locking required
-            if not leading
-                then do
-                    raft <- atomically $ readTVar (raftContext vRaft)
-                    (log,state) <- commitEntries (raftLog raft) (logIndex $ committed) (raftState raft)
-                    (checkpointedLog,checkpointedState) <- checkpoint log state
-                    atomically $ do
-                        modifyTVar (raftContext vRaft) $ \oldRaft ->
-                                setRaftLog checkpointedLog $ setRaftState checkpointedState oldRaft
-                else return ()
             if leading && (name /= leader)
                 -- someone else is sending append entries, so step down
                 then return ()

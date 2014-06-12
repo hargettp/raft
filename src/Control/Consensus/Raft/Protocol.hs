@@ -148,7 +148,7 @@ goPerformAction cs cfg member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> Configuration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe (Name,RaftTime))
+onAppendEntries :: Endpoint -> Configuration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe Name)
 onAppendEntries endpoint cfg server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ clusterTimeouts cfg)
     case msg of
@@ -156,7 +156,7 @@ onAppendEntries endpoint cfg server fn = do
             let Right req = decode bytes
             result <- fn req
             reply $ encode result
-            return $ Just (aeLeader req,aeCommittedTime req)
+            return $ Just $ aeLeader req
         Nothing -> return Nothing
 
 {-|
