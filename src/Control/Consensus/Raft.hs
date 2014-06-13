@@ -112,6 +112,27 @@ follow vRaft = do
 -}
 doFollow :: (RaftLog l v) => Raft l v -> IO ()
 doFollow vRaft = do
+    doSynchronize vRaft onRequest alwaysContinue
+    where
+        onRequest raft req = do
+            let log = raftLog raft
+                index = (1 + (logIndex $ aePreviousTime req))
+            newLog <- appendEntries log index (aeEntries req)
+            updatedRaft <- atomically $ do
+                    preCommitConfigurationChange vRaft (aeEntries req)
+                    modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
+                    readTVar (raftContext vRaft)
+            (committedLog,committedState) <- commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
+            (checkpointedLog,checkpointedState) <- checkpoint committedLog committedState
+            checkpointedRaft <- atomically $ do
+                modifyTVar (raftContext vRaft) $ \oldRaft ->
+                        setRaftLog checkpointedLog $ setRaftState checkpointedState oldRaft
+                readTVar (raftContext vRaft)
+            return checkpointedRaft
+        alwaysContinue _ = True
+
+doSynchronize :: (RaftLog l v) => Raft l v -> ((RaftContext l v) -> AppendEntries -> IO (RaftContext l v)) -> (Name -> Bool) -> IO ()
+doSynchronize vRaft reqfn contfn = do
     initialRaft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint initialRaft
         cfg = raftStateConfiguration $ raftState initialRaft
@@ -131,29 +152,16 @@ doFollow vRaft = do
                     let log = raftLog raft
                     -- check previous entry for consistency
                     return ( (lastAppendedTime log) == (aePreviousTime req),raft)
-        if valid
-            then do
-                let log = raftLog raft
-                    index = (1 + (logIndex $ aePreviousTime req))
-                newLog <- appendEntries log index (aeEntries req)
-                updatedRaft <- atomically $ do
-                        preCommitConfigurationChange vRaft (aeEntries req)
-                        modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
-                        readTVar (raftContext vRaft)
-                (committedLog,committedState) <- commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
-                (checkpointedLog,checkpointedState) <- checkpoint committedLog committedState
-                checkpointedRaft <- atomically $ do
-                    modifyTVar (raftContext vRaft) $ \oldRaft ->
-                            setRaftLog checkpointedLog $ setRaftState checkpointedState oldRaft
-                    readTVar (raftContext vRaft)
-                return $ mkResult valid checkpointedRaft
-            else return $ mkResult valid raft
+        synchronizedRaft <- if valid
+                then reqfn raft req
+                else return raft
+        return $ mkResult valid synchronizedRaft
     case maybeLeader of
         -- we did hear a message before the timeout, and we have a committed time
-        Just _ ->  do
-            -- keep following
-            doFollow vRaft
-        -- we heard no message before timeout
+        Just leader ->  do
+            if contfn leader
+                then doSynchronize vRaft reqfn contfn
+                else return ()
         Nothing -> return ()
 
 preCommitConfigurationChange :: (RaftLog l v) => Raft l v -> [RaftLogEntry] -> STM ()
@@ -308,37 +316,15 @@ doPulse vRaft actions = do
 doRespond :: (RaftLog l v) => Raft l v -> IO ()
 doRespond vRaft = do
     initialRaft <- atomically $ readTVar (raftContext vRaft)
-    let endpoint = raftEndpoint initialRaft
-        cfg = raftStateConfiguration $ raftState initialRaft
-        name = raftName initialRaft
-    maybeLeader <- onAppendEntries endpoint cfg name $ \req -> do
-        debugM _log $ printf "Server %v received %v" name (show req)
-        infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
-        (valid, raft) <- atomically $ do
-            raft <-readTVar (raftContext vRaft)
-            if (aeLeaderTerm req) < (raftCurrentTerm raft)
-                then return (False,raft)
-                else do
-                    -- first update raft state
-                    modifyTVar (raftContext vRaft) $ \oldRaft ->
-                            setRaftTerm (aeLeaderTerm req)
-                                $ setRaftLeader (Just $ aeLeader req)
-                                $ setRaftLastCandidate Nothing oldRaft
-                    let log = raftLog raft
-                    -- check previous entry for consistency
-                    return ( (lastAppendedTime log) == (aePreviousTime req),raft)
-        return $ mkResult valid raft
-    case maybeLeader of
-        -- we did hear a message before the timeout, and we have a committed time
-        Just leader ->  do
-            if name /= leader
-                -- someone else is sending append entries, so step down
-                then return ()
-                -- keep following
-                else doRespond vRaft
-        -- we heard no message before timeout
-        Nothing -> return ()
+    let name = raftName initialRaft
+    doSynchronize vRaft onRequest (continueIfLeader name)
+    where
+        onRequest raft _ = return raft
+        continueIfLeader name leader = name == leader
 
+{-|
+Service requests from clients
+-}
 doServe :: (RaftLog l v) => Raft l v -> Actions -> IO ()
 doServe vRaft actions = do
     raft <- atomically $ readTVar (raftContext vRaft)
