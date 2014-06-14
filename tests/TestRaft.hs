@@ -69,6 +69,9 @@ tests = [
     testCase "consistency" testConsistency,
     testCase "2consistency" test2Consistency,
     testCase "3consistency" test3Consistency,
+    testCase "10consistency" test10Consistency,
+    testCase "5cluster-10consistency" test5Cluster10Consistency,
+    testCase "7cluster-10consistency" test7Cluster10Consistency,
     testCase "performAction" testPerformAction,
     testCase "goPerformAction" testGoPerformAction,
     testCase "clientPerformAction" testClientPerformAction,
@@ -253,6 +256,99 @@ test3Consistency = do
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
                                 assertBool "" $ all (== (IntState 13)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
+
+test10Consistency :: Assertion
+test10Consistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3"]
+    with3Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 3
+                                assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 406)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
+
+test5Cluster10Consistency :: Assertion
+test5Cluster10Consistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
+    with5Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 3
+                                assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 406)) states)
+        case errOrResult of
+            Right _ -> assertBool "" True
+            Left _ -> assertBool "Performing action failed" False
+
+test7Cluster10Consistency :: Assertion
+test7Cluster10Consistency = do
+    transport <- newMemoryTransport
+    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5","server6","server7"]
+    with7Servers  transport cfg $ \vRafts -> do
+        pause
+        errOrResult <- race (do 
+                _ <- waitForLeader 10 (1 :: Integer) vRafts
+                threadDelay $ 30 * 1000 * 1000
+                return ())
+            (withClient transport "client1" cfg $ \client -> do
+                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                _ <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ encode $ Subtract 2
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 3
+                                assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
+                                -- pause -- have to wait for synchronization to occur
+                                threadDelay $ 2 * 1000 * 1000
+                                states <- allStates vRafts
+                                assertBool "" $ all (== (IntState 406)) states)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -479,3 +575,14 @@ with5Servers transport cfg fn =
         withServer transport cfg (names !! 2) $ \vRaft3 ->
         withServer transport cfg (names !! 3) $ \vRaft4 ->
         withServer transport cfg (names !! 4) $ \vRaft5 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3] ++ [vRaft4] ++ [vRaft5]
+
+with7Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
+with7Servers transport cfg fn = 
+    let names = clusterMembers cfg
+    in withServer transport cfg (names !! 0) $ \vRaft1 ->
+        withServer transport cfg (names !! 1) $ \vRaft2 ->
+        withServer transport cfg (names !! 2) $ \vRaft3 ->
+        withServer transport cfg (names !! 3) $ \vRaft4 ->
+        withServer transport cfg (names !! 4) $ \vRaft5 ->
+        withServer transport cfg (names !! 5) $ \vRaft6 ->
+        withServer transport cfg (names !! 6) $ \vRaft7 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3] ++ [vRaft4] ++ [vRaft5] ++ [vRaft6] ++ [vRaft7]
