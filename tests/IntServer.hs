@@ -53,7 +53,7 @@ data IntCommand = Add Int
 
 instance Serialize IntCommand
 
-data IntState = IntState Int deriving (Eq,Show,Generic)
+data IntState = IntState Int deriving (Eq,Show,Generic,Ord)
 
 instance Serialize IntState
 

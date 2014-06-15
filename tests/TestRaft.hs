@@ -36,6 +36,7 @@ import Control.Concurrent.Async
 import Control.Concurrent.STM
 import Control.Exception
 
+import qualified Data.Map as M
 import Data.Serialize
 
 import Network.Endpoints
@@ -208,7 +209,8 @@ testConsistency = do
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 1)) states)
+                                assertBool "" $ all (== (IntState 1)) states
+                                checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -231,7 +233,8 @@ test2Consistency = do
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 15)) states)
+                                assertBool "" $ all (== (IntState 15)) states
+                                checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -255,7 +258,8 @@ test3Consistency = do
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 13)) states)
+                                assertBool "" $ all (== (IntState 13)) states
+                                checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -286,7 +290,8 @@ test10Consistency = do
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 406)) states)
+                                assertBool "" $ all (== (IntState 406)) states
+                                checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -317,7 +322,8 @@ test5Cluster10Consistency = do
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 406)) states)
+                                assertBool "" $ all (== (IntState 406)) states
+                                checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -333,7 +339,7 @@ test7Cluster10Consistency = do
                 threadDelay $ 30 * 1000 * 1000
                 return ())
             (withClient transport "client1" cfg $ \client -> do
-                                _ <- waitForLeader 5 (1 :: Integer) vRafts
+                                _ <- waitForLeader 10 (1 :: Integer) vRafts
                                 _ <- performAction client $ Cmd $ encode $ Add 3
                                 _ <- performAction client $ Cmd $ encode $ Multiply 5
                                 _ <- performAction client $ Cmd $ encode $ Subtract 2
@@ -348,7 +354,8 @@ test7Cluster10Consistency = do
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
                                 states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 406)) states)
+                                assertBool "" $ all (== (IntState 406)) states
+                                checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
@@ -460,15 +467,19 @@ testWithClientPerformAction = do
 -- helpers
 --------------------------------------------------------------------------------
 
+checkForConsistency_ :: [Raft IntLog IntState] -> IO (Maybe Name)
+checkForConsistency_ rafts = checkForConsistency 1 Nothing rafts
+
 checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntState] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
     let leaders = map (clusterLeader . raftStateConfiguration . raftState) rafts
         results = map (raftStateData . raftState) rafts
-    -- all results should be equal--and since we didn't perform any commands, should still be 0
-    assertBool ((show run) ++ ": All results should be equal") $ all (== (IntState 0)) results
-    assertBool ((show run) ++ ": All members should have same leader: " ++ (show leaders)) $ all (== (leaders !! 0)) leaders
-    assertBool ((show run) ++ ": There must be a leader " ++ (show leaders)) $ all (/= Nothing) leaders
+        indexes = map (lastCommitted . raftLog) rafts
+    assertBool (printf "%d: Most results should be equal" (show run)) $ hasCommon results
+    assertBool (printf "%d: Most log indexes should be equal" (show run)) $ hasCommon indexes
+    assertBool (printf "%d: Most members should have same leader: %s" (show run) (show leaders)) $ hasCommon leaders
+    assertBool (printf "%d: There must be a leader %s" (show run) (show leaders)) $ all (/= Nothing) leaders
     let leader = (leaders !! 0)
     case possibleLeader of
         Just _ -> if all (== possibleLeader) leaders
@@ -522,6 +533,27 @@ withClient transport name cfg fn = do
     bindEndpoint_ endpoint name
     let client = newClient endpoint name cfg
     fn client
+
+hasCommon :: (Eq a,Ord a) => [a] -> Bool
+hasCommon values = let (_,count) = common values
+                       majority = 1 + ((length values ) `quot` 2)
+                      in count >= majority 
+
+common :: (Eq a,Ord a) => [a] -> (a,Int)
+common values = classify values M.empty
+    where
+        classify [] classified = mostCommon $ M.toList classified
+        classify (value:rest) classified  = classify rest (tally value classified)
+        mostCommon [] = error "No common values!"
+        mostCommon (pair:[]) = pair
+        mostCommon (pair:rest) = let (value,count) = pair
+                                     (highestValue,highestCount) = mostCommon rest
+                                    in if count > highestCount 
+                                        then (value,count)
+                                        else (highestValue,highestCount)
+        tally value classified = case M.lookup value classified of
+            Just count -> M.insert value (count + 1) classified
+            Nothing -> M.insert value 1 classified
 
 newTestConfiguration :: [Name] -> Configuration
 newTestConfiguration members = (mkConfiguration members) {configurationTimeouts = testTimeouts}
