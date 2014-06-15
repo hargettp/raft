@@ -44,7 +44,7 @@ module Control.Consensus.Raft.Log (
 
 -- local imports
 
-import Control.Consensus.Log
+import Data.Log
 import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Members
@@ -106,12 +106,12 @@ data RaftState v = (Eq v, Show v) => RaftState {
     raftStateLastCandidate :: Maybe Name,
     raftStateName :: Name,
     raftStateConfigurationIndex :: Maybe Index,
-    raftStateConfiguration :: Configuration,
+    raftStateConfiguration :: RaftConfiguration,
     raftStateMembers :: Members,
     raftStateData :: v
 }
 
-mkRaftState :: (Eq v, Show v) => v -> Configuration -> Name -> RaftState v
+mkRaftState :: (Eq v, Show v) => v -> RaftConfiguration -> Name -> RaftState v
 mkRaftState initialData cfg name = RaftState {
     raftStateCurrentTerm = 0,
     raftStateLastCandidate = Nothing,
@@ -136,9 +136,9 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
     canApplyEntry oldRaftState index entry = do
         let members = raftStateMembers oldRaftState
             cfg = raftStateConfiguration oldRaftState
-            term = membersSafeAppendedTerm members cfg
+            term = membersSafeAppendedTerm members $ clusterConfiguration cfg
             currentTerm = raftStateCurrentTerm oldRaftState
-            leader = (Just $ raftStateName oldRaftState) == (clusterLeader cfg)
+            leader = (Just $ raftStateName oldRaftState) == (clusterLeader $ clusterConfiguration cfg)
         infoM _log $ printf "%v: Safe term for members %v is %v" currentTerm (show $ M.map (logTerm . memberLogLastAppended) members) term
         if leader
                 then if term /= raftStateCurrentTerm oldRaftState
@@ -159,10 +159,12 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
                 newData <- applyEntry oldData index cmd
                 return $ oldRaftState {raftStateData = newData}
             applyAction action = do
-                let cfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
+                let cfg = applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldRaftState) action
                 infoM _log $ printf "New configuration is %v" (show cfg)
                 return $ oldRaftState {
-                    raftStateConfiguration = cfg
+                    raftStateConfiguration = (raftStateConfiguration oldRaftState) {
+                        clusterConfiguration = cfg
+                    }
                 }
 
 raftCurrentTerm :: (RaftLog l v) => RaftContext l v -> Term
@@ -215,19 +217,21 @@ Update the 'RaftState' in a new 'RaftContext' to specify a new leader
 -}
 setRaftLeader :: Maybe Name -> RaftContext l v -> RaftContext l v
 setRaftLeader leader raft = 
-    let cfg = raftStateConfiguration $ raftState raft
+    let cfg = clusterConfiguration $ raftStateConfiguration $ raftState raft
         in case cfg of
-            Configuration _ _ _ _ -> raft {
+            Configuration _ _ _ -> raft {
                     raftState = (raftState raft) {
-                        raftStateConfiguration = cfg {
+                        raftStateConfiguration = (raftStateConfiguration $ raftState raft) {
+                            clusterConfiguration = cfg {
                             configurationLeader = leader
-                        }}
+                        }}}
                 }
             JointConfiguration _ jointNew -> raft {
                     raftState = (raftState raft) {
-                        raftStateConfiguration = jointNew {
+                        raftStateConfiguration = (raftStateConfiguration $ raftState raft) {
+                            clusterConfiguration = jointNew {
                             configurationLeader = leader
-                        }}
+                        }}}
                 }
 
 isRaftLeader :: (RaftLog l v) => RaftContext l v -> Bool
@@ -241,12 +245,13 @@ setRaftLog rlog raft = raft {
 setRaftConfiguration :: (RaftLog l v) => Configuration -> RaftContext l v -> RaftContext l v
 setRaftConfiguration cfg raft =
     let newState = (raftState raft) {
-        raftStateConfiguration = cfg
-        }
+        raftStateConfiguration = (raftStateConfiguration $ raftState raft) {
+                            clusterConfiguration = cfg
+        }}
         in setRaftState newState raft
 
 raftConfiguration :: (RaftLog l v) => RaftContext l v -> Configuration 
-raftConfiguration raft = raftStateConfiguration $ raftState raft
+raftConfiguration raft = clusterConfiguration $ raftStateConfiguration $ raftState raft
 
 setRaftConfigurationIndex :: (RaftLog l v) => Maybe Index -> RaftContext l v -> RaftContext l v
 setRaftConfigurationIndex index raft =

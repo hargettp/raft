@@ -26,7 +26,7 @@ import IntServer
 
 -- external imports
 
-import Control.Consensus.Log
+import Data.Log
 import Data.Serialize
 
 import Prelude hiding (log)
@@ -54,7 +54,7 @@ testNewLog = do
 testEmptyLog :: Assertion
 testEmptyLog = do
     log <- mkIntLog
-    let val = mkRaftState (IntState 0) (mkConfiguration []) "server1"
+    let val = mkRaftState (IntState 0) (mkRaftConfiguration []) "server1"
     (_,chg) <- commitEntries log 0 val
     assertEqual "Empty log should leave value unchanged" val chg
 
@@ -63,7 +63,7 @@ testSingleAction = do
     log <- mkIntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2)]
     log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2)]
-    let val = mkRaftState (IntState 1) (mkConfiguration []) "server1"
+    let val = mkRaftState (IntState 1) (mkRaftConfiguration []) "server1"
     entries <- fetchEntries log1 0 1
     let lastIndex = lastAppended log1
     assertEqual "Log index should be 0" 0 lastIndex
@@ -78,7 +78,7 @@ testDoubleAction = do
     log <- mkIntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2),IntLogEntry (Multiply 5)]
     log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2),RaftLogEntry 1 $ Cmd $ encode (Multiply 5)]
-    let val = mkRaftState (IntState 1) (mkConfiguration []) "server1"
+    let val = mkRaftState (IntState 1) (mkRaftConfiguration []) "server1"
     entries <- fetchEntries log1 0 2
     assertBool "Log should not be empty" (not $ null entries)
     assertEqual "Length incorrect" 2 (length entries)

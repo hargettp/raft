@@ -31,7 +31,7 @@ module Control.Consensus.Raft.Types (
 
 -- local imports
 
-import Control.Consensus.Log
+import Data.Log
 
 -- external imports
 

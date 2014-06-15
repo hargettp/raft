@@ -23,7 +23,7 @@
 module Control.Consensus.Raft (
     withConsensus,
 
-    module Control.Consensus.Log,
+    module Data.Log,
     module Control.Consensus.Raft.Client,
     module Control.Consensus.Raft.Configuration,
     module Control.Consensus.Raft.Types
@@ -39,7 +39,7 @@ import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
 
-import Control.Consensus.Log
+import Data.Log
 
 -- external imports
 
@@ -172,7 +172,7 @@ preCommitConfigurationChange vRaft (entry:_) = do
         action -> do
             raft <- readTVar (raftContext vRaft)
             let oldRaftState = raftState raft
-                newCfg = applyConfigurationAction (raftStateConfiguration oldRaftState) action
+                newCfg = applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldRaftState) action
                 newRaft = setRaftConfiguration newCfg raft
             writeTVar (raftContext vRaft) newRaft
     -- we don't need to recurse, because we expect the configuration change at the beginning
@@ -187,7 +187,7 @@ doVote vRaft = do
     let endpoint = raftEndpoint initialRaft
         cfg = raftStateConfiguration $ raftState initialRaft
         name = raftName initialRaft
-        leading = (Just name) == (clusterLeader cfg)
+        leading = (Just name) == (clusterLeader $ clusterConfiguration cfg)
     votedForCandidate <- onRequestVote endpoint name $ \req -> do
         debugM _log $ printf "Server %v received vote request from %v" name (show $ rvCandidate req)
         (raft,vote,reason) <- atomically $ do
@@ -229,7 +229,7 @@ volunteer vRaft = do
         raft <- readTVar $ raftContext vRaft
         let name = raftName raft
             cfg = raftStateConfiguration $ raftState raft
-        return $ isClusterParticipant name cfg
+        return $ isClusterParticipant name (clusterConfiguration cfg)
     -- this allows us to have raft servers that are up and running,
     -- but they will just patiently wait until they are a participant
     -- before volunteering
@@ -251,7 +251,7 @@ doVolunteer vRaft = do
     let candidate = raftName raft
         cfg = raftStateConfiguration $ raftState raft
         endpoint = raftEndpoint raft
-        members = clusterMembers cfg
+        members = clusterMembers $ clusterConfiguration cfg
         cs = newCallSite endpoint candidate
         term = raftCurrentTerm raft
         log = raftLog raft
@@ -361,12 +361,14 @@ append vRaft actions clients = do
                 nextIndex = (lastAppended oldLog) + 1
                 revisedAction = case action of
                     Cmd _ -> action
-                    cfgAction -> SetConfiguration $ applyConfigurationAction (raftStateConfiguration oldState) cfgAction
+                    cfgAction -> SetConfiguration $ applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldState) cfgAction
             newLog <- appendEntries oldLog nextIndex [RaftLogEntry term revisedAction]
             (revisedLog,revisedState) <- case revisedAction of
                 SetConfiguration newCfg -> do
                     let newState = oldState {
-                        raftStateConfiguration = newCfg,
+                        raftStateConfiguration = (raftStateConfiguration oldState) {
+                            clusterConfiguration = newCfg
+                        },
                         raftStateConfigurationIndex = case newCfg of
                             JointConfiguration _ _ -> Just nextIndex
                             _ -> Nothing
@@ -396,7 +398,7 @@ commit vRaft clients = do
     infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     let members = raftMembers raft
         newMembers = updateMembers members results
-        newAppendedIndex = membersSafeAppendedIndex newMembers cfg
+        newAppendedIndex = membersSafeAppendedIndex newMembers $ clusterConfiguration cfg
         newTerm = membersHighestTerm newMembers
     atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
         setRaftMembers newMembers oldRaft
@@ -422,7 +424,7 @@ commit vRaft clients = do
                 Just cfgIndex ->
                     if lastCommitted newLog >= cfgIndex
                         then do
-                            let revisedCfg = case raftStateConfiguration newState of
+                            let revisedCfg = case (clusterConfiguration $ raftStateConfiguration newState) of
                                     JointConfiguration _ jointNew -> jointNew
                                     newCfg -> newCfg
                             revisedLog <- appendEntries newLog ((lastAppended newLog) + 1)
@@ -497,7 +499,7 @@ doRedirect vRaft = do
 mkResult :: (RaftLog l v) => Bool -> RaftContext l v -> MemberResult
 mkResult success raft = MemberResult {
     memberActionSuccess = success,
-    memberLeader = clusterLeader $ raftStateConfiguration $ raftState raft,
+    memberLeader = clusterLeader $ clusterConfiguration $ raftStateConfiguration $ raftState raft,
     memberCurrentTerm = raftCurrentTerm raft,
     memberLastAppended = lastAppendedTime $ raftLog raft,
     memberLastCommitted = lastCommittedTime $ raftLog raft

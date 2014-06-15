@@ -88,15 +88,15 @@ methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
 goAppendEntries :: CallSite
-            -> Configuration            -- ^^ Cluster configuration
+            -> RaftConfiguration            -- ^^ Cluster configuration
             -> Term                     -- ^^ Leader's current term
             -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
             -> RaftTime                 -- ^^ Last index up to which all entries are committed on leader
             -> [RaftLogEntry]    -- ^^ Entries to append
             -> IO (M.Map Name (Maybe MemberResult))
 goAppendEntries cs cfg term prevTime commitTime entries = do
-    let Just leader = clusterLeader cfg
-        members = clusterMembers cfg
+    let Just leader = clusterLeader $ clusterConfiguration cfg
+        members = clusterMembers $ clusterConfiguration cfg
         timeout = (timeoutRpc $ clusterTimeouts cfg)
     results <- gcallWithTimeout cs members methodAppendEntries timeout
         $ encode $ AppendEntries leader term prevTime commitTime entries
@@ -111,13 +111,13 @@ methodRequestVote :: String
 methodRequestVote = "requestVote"
 
 goRequestVote :: CallSite
-                -> Configuration -- ^^ Cluster configuration
+                -> RaftConfiguration -- ^^ Cluster configuration
                 -> Term     -- ^^ Candidate's term
                 -> Name -- ^^ Candidate's id
                 -> RaftTime -- ^^ `RaftTime` of candidate's last entry
                 -> IO (M.Map Name (Maybe MemberResult))
 goRequestVote cs cfg term candidate lastEntryTime = do
-    let members = clusterMembers cfg
+    let members = clusterMembers $ clusterConfiguration cfg
     timeout <- electionTimeout $ clusterTimeouts cfg
     results <- gcallWithTimeout cs members methodRequestVote timeout
         $ encode $ RequestVote candidate term lastEntryTime
@@ -132,7 +132,7 @@ methodPerformAction :: String
 methodPerformAction = "performAction"
 
 goPerformAction :: CallSite
-                    -> Configuration
+                    -> RaftConfiguration
                     -> Name
                     -> Action
                     -> IO (Maybe MemberResult)
@@ -148,7 +148,7 @@ goPerformAction cs cfg member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> Configuration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe Name)
+onAppendEntries :: Endpoint -> RaftConfiguration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe Name)
 onAppendEntries endpoint cfg server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ clusterTimeouts cfg)
     case msg of

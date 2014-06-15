@@ -47,10 +47,10 @@ _log = "raft.client"
 data Client = Client {
     clientEndpoint :: Endpoint,
     clientName :: Name,
-    clientConfiguration :: Configuration
+    clientConfiguration :: RaftConfiguration
 }
 
-newClient :: Endpoint -> Name -> Configuration -> Client
+newClient :: Endpoint -> Name -> RaftConfiguration -> Client
 newClient endpoint name cfg = Client {
     clientConfiguration = cfg,
     clientEndpoint = endpoint,
@@ -65,10 +65,10 @@ performAction client action = do
     -- TODO consider whether there is an eventual timeout
     -- in case the cluster can't be reached
     let cfg = clientConfiguration client
-        leader = case clusterLeader cfg of
+        leader = case clusterLeader $ clusterConfiguration cfg of
             Just lead -> [lead]
             Nothing -> []
-        members = leader ++ (clusterMembers cfg)
+        members = leader ++ (clusterMembers $ clusterConfiguration cfg)
         cs = (newCallSite (clientEndpoint client) (clientName client))
     perform cs cfg members members
     where

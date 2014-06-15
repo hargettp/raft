@@ -408,7 +408,10 @@ testGoPerformAction = do
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
         action = Cmd $ encode $ Add 1
-        cfg = (newTestConfiguration [server]) {configurationLeader = Just server}
+        raftcfg = newTestConfiguration [server]
+        cfg = raftcfg {
+            clusterConfiguration = (clusterConfiguration raftcfg) {configurationLeader = Just server
+            }}
     response <- goPerformAction cs cfg server action
     case response of
         Just result -> assertBool "Result should be true" $ memberActionSuccess result
@@ -473,7 +476,7 @@ checkForConsistency_ rafts = checkForConsistency 1 Nothing rafts
 checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntState] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . raftState) rafts
+    let leaders = map (clusterLeader . clusterConfiguration . raftStateConfiguration . raftState) rafts
         results = map (raftStateData . raftState) rafts
         indexes = map (lastCommitted . raftLog) rafts
     assertBool (printf "%d: Most results should be equal" (show run)) $ hasCommon results
@@ -512,7 +515,7 @@ waitForLeader maxCount attempt vRafts = do
 allLeaders :: [Raft IntLog IntState] -> IO [Maybe Name]
 allLeaders vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
-    let leaders = map (clusterLeader . raftStateConfiguration . raftState) rafts
+    let leaders = map (clusterLeader . clusterConfiguration . raftStateConfiguration . raftState) rafts
     return leaders
 
 allStates :: [Raft IntLog IntState] -> IO [IntState]
@@ -527,7 +530,7 @@ allLastCommitted vRafts = do
     let committed = map (lastCommitted . raftLog) rafts
     return committed
 
-withClient :: Transport -> Name -> Configuration -> (Client -> IO a) -> IO a
+withClient :: Transport -> Name -> RaftConfiguration -> (Client -> IO a) -> IO a
 withClient transport name cfg fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
@@ -555,8 +558,8 @@ common values = classify values M.empty
             Just count -> M.insert value (count + 1) classified
             Nothing -> M.insert value 1 classified
 
-newTestConfiguration :: [Name] -> Configuration
-newTestConfiguration members = (mkConfiguration members) {configurationTimeouts = testTimeouts}
+newTestConfiguration :: [Name] -> RaftConfiguration
+newTestConfiguration members = (mkRaftConfiguration members) {clusterTimeouts = testTimeouts}
 
 pause :: IO ()
 pause = threadDelay serverTimeout
@@ -575,7 +578,7 @@ serverTimeout = 2 * (snd $ timeoutElectionRange testTimeouts)
 {-|
 Utility for running a server only for a defined period of time
 -}
-withServer :: Transport -> Configuration -> Name -> (IntRaft -> IO ()) -> IO ()
+withServer :: Transport -> RaftConfiguration -> Name -> (IntRaft -> IO ()) -> IO ()
 withServer transport cfg name fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
@@ -584,33 +587,33 @@ withServer transport cfg name fn = do
     finally (withConsensus endpoint name initialLog initialState fn)
         (unbindEndpoint_ endpoint name)
 
-with3Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
+with3Servers :: Transport -> RaftConfiguration -> ([IntRaft] -> IO ()) -> IO ()
 with3Servers transport cfg fn = 
-    let names = clusterMembers cfg
+    let names = clusterMembers $ clusterConfiguration cfg
     in withServer transport cfg (names !! 0) $ \vRaft1 ->
         withServer transport cfg (names !! 1) $ \vRaft2 ->
         withServer transport cfg (names !! 2) $ \vRaft3 -> fn $ [vRaft1,vRaft2,vRaft3]
 
-with3Servers1NonParticipant :: Transport -> Configuration -> Name -> ([IntRaft] -> IO ()) -> IO ()
+with3Servers1NonParticipant :: Transport -> RaftConfiguration -> Name -> ([IntRaft] -> IO ()) -> IO ()
 with3Servers1NonParticipant transport cfg name fn = 
-    let names = clusterMembers cfg
+    let names = clusterMembers $ clusterConfiguration cfg
     in withServer transport cfg (names !! 0) $ \vRaft1 ->
         withServer transport cfg (names !! 1) $ \vRaft2 ->
         withServer transport cfg (names !! 2) $ \vRaft3 -> 
         withServer transport cfg name $ \vRaft4 -> fn $ [vRaft1, vRaft2, vRaft3, vRaft4]
 
-with5Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
+with5Servers :: Transport -> RaftConfiguration -> ([IntRaft] -> IO ()) -> IO ()
 with5Servers transport cfg fn = 
-    let names = clusterMembers cfg
+    let names = clusterMembers $ clusterConfiguration cfg
     in withServer transport cfg (names !! 0) $ \vRaft1 ->
         withServer transport cfg (names !! 1) $ \vRaft2 ->
         withServer transport cfg (names !! 2) $ \vRaft3 ->
         withServer transport cfg (names !! 3) $ \vRaft4 ->
         withServer transport cfg (names !! 4) $ \vRaft5 -> fn $ [vRaft1] ++ [vRaft2] ++ [vRaft3] ++ [vRaft4] ++ [vRaft5]
 
-with7Servers :: Transport -> Configuration -> ([IntRaft] -> IO ()) -> IO ()
+with7Servers :: Transport -> RaftConfiguration -> ([IntRaft] -> IO ()) -> IO ()
 with7Servers transport cfg fn = 
-    let names = clusterMembers cfg
+    let names = clusterMembers $ clusterConfiguration cfg
     in withServer transport cfg (names !! 0) $ \vRaft1 ->
         withServer transport cfg (names !! 1) $ \vRaft2 ->
         withServer transport cfg (names !! 2) $ \vRaft3 ->

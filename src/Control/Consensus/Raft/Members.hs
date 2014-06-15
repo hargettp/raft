@@ -38,7 +38,7 @@ module Control.Consensus.Raft.Members (
 
 -- local imports
 
-import Control.Consensus.Log
+import Data.Log
 import Control.Consensus.Raft.Configuration
 -- import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Types
@@ -81,8 +81,8 @@ updateMember member result = member {
 
 type Members = M.Map Name Member
 
-mkMembers :: Configuration -> RaftTime -> Members
-mkMembers cfg time = M.fromList $ map (\name -> (name,mkMember time name)) (clusterMembers cfg)
+mkMembers :: RaftConfiguration -> RaftTime -> Members
+mkMembers cfg time = M.fromList $ map (\name -> (name,mkMember time name)) (clusterMembers $ clusterConfiguration cfg)
 
 reconfigureMembers :: Members -> Configuration -> RaftTime -> Members
 reconfigureMembers members cfg time = 
@@ -112,7 +112,7 @@ updateMembers members results = M.map applyUpdates members
                 Just (Just result) -> updateMember member result
 
 membersSafeAppendedTerm :: Members -> Configuration -> Term
-membersSafeAppendedTerm members cfg@(Configuration _ _ _ _) =
+membersSafeAppendedTerm members cfg@(Configuration _ _ _) =
     if M.null members
         then -1
         else (membersAppendedTerm members cfg) !! majority
@@ -141,7 +141,7 @@ value that is less than or equal to the highest appended
 log entry index on the majority of servers.
 -}
 membersSafeAppendedIndex :: Members -> Configuration -> Index
-membersSafeAppendedIndex members cfg@(Configuration _ _ _ _) =
+membersSafeAppendedIndex members cfg@(Configuration _ _ _) =
     if M.null members
         then -1
         else (membersAppendedIndex members cfg) !! majority
