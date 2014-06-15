@@ -1,9 +1,9 @@
-raft
+pax-raft
 =======
 
 [![Build Status](https://travis-ci.org/hargettp/raft.svg?branch=master)](https://travis-ci.org/hargettp/raft)
 
-Haskell implementation of Raft consensus algorithm.
+Haskell implementation of Raft consensus algorithm. Uses the common data types in Pax.
 
 Not 100% functional, but making progress.
 
