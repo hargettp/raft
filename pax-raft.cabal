@@ -83,6 +83,6 @@ Test-Suite test-raft
         pax,
         stm,
         -- this project's modules
-        raft
+        pax-raft
 
     ghc-options: -Wall -threaded
