@@ -26,7 +26,7 @@ module Control.Consensus.Raft.Actions (
 
 -- local imports
 
-import Control.Consensus.Raft.Configuration
+import Control.Consensus.Raft.Types
 
 -- external imports
 

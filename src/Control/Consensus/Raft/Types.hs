@@ -15,6 +15,12 @@
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft.Types (
+    -- * Configuration
+    RaftConfiguration(..),
+    mkRaftConfiguration,
+
+    module Control.Consensus.Configuration,
+
     -- * General types
     Term,
     RaftTime(..),
@@ -35,9 +41,13 @@ import Data.Log
 
 -- external imports
 
+import Control.Consensus.Configuration
+
 import Data.Serialize
 
 import GHC.Generics
+
+import Network.Endpoints
 
 import qualified System.Random as R
 
@@ -113,3 +123,24 @@ Return a new election timeout
 -}
 electionTimeout :: Timeouts -> IO Timeout
 electionTimeout outs = R.randomRIO $ timeoutElectionRange outs
+
+--------------------------------------------------------------------------------
+-- Cofiguration
+--------------------------------------------------------------------------------
+
+{- |
+A configuration identifies all the members of a cluster and the nature of their participation 
+in the cluster.
+-}
+data RaftConfiguration = RaftConfiguration {
+    clusterConfiguration :: Configuration,
+    clusterTimeouts :: Timeouts
+    } deriving (Generic,Show,Eq)
+
+instance Serialize RaftConfiguration
+
+mkRaftConfiguration :: [Name] -> RaftConfiguration
+mkRaftConfiguration participants = RaftConfiguration {
+    clusterConfiguration = mkConfiguration participants,
+    clusterTimeouts = defaultTimeouts
+}

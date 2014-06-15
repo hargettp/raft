@@ -25,7 +25,6 @@ module Control.Consensus.Raft (
 
     module Data.Log,
     module Control.Consensus.Raft.Client,
-    module Control.Consensus.Raft.Configuration,
     module Control.Consensus.Raft.Types
 ) where
 
@@ -33,7 +32,6 @@ module Control.Consensus.Raft (
 
 import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Client
-import Control.Consensus.Raft.Configuration
 import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
