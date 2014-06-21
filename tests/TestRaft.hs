@@ -42,6 +42,8 @@ import Data.Serialize
 import Network.Endpoints
 import Network.RPC
 import Network.Transport.Memory
+import Network.Transport.TCP
+import Network.Transport.UDP
 
 import System.Log.Logger
 
@@ -58,26 +60,79 @@ _log :: String
 _log = "test.raft"
 
 tests :: [Test.Framework.Test]
-tests = [
-    testCase "3cluster" test3Cluster,
-    testCase "3cluster-1nonparticipant" test3Cluster1NonParticipant,
-    testCase "3cluster-add1" test3ClusterAdd1,
-    testCase "3cluster-stability" test3ClusterStability,
-    testCase "3cluster-1nonparticipant-stability" test3Cluster1NonParticipantStability,
-    testCase "5cluster" test5Cluster,
-    testCase "5cluster-stability" test5ClusterStability,
-    testCase "client" testClient,
-    testCase "consistency" testConsistency,
-    testCase "2consistency" test2Consistency,
-    testCase "3consistency" test3Consistency,
-    testCase "10consistency" test10Consistency,
-    testCase "5cluster-10consistency" test5Cluster10Consistency,
-    testCase "7cluster-10consistency" test7Cluster10Consistency,
-    testCase "performAction" testPerformAction,
-    testCase "goPerformAction" testGoPerformAction,
-    testCase "clientPerformAction" testClientPerformAction,
-    testCase "withClientPerformAction" testWithClientPerformAction
-    ]
+tests = let servers1 = ["server1"]
+            servers3 = ["server1","server2","server3"]
+            servers5 = ["server1","server2","server3","server4","server5"]
+            servers7 = ["server1","server2","server3","server4","server5","server6","server7"]
+            mem1Cfg = newTestConfiguration servers1
+            mem3Cfg = newTestConfiguration servers3
+            socket1Cfg = newSocketTestConfiguration servers1
+            socket3Cfg = newSocketTestConfiguration servers3
+            mem5Cfg = newTestConfiguration servers5
+            socket5Cfg = newSocketTestConfiguration servers5
+            mem7Cfg = newTestConfiguration servers7
+            socket7Cfg = newSocketTestConfiguration servers7
+            resolver = resolverFromList[
+                    ("server1","localhost:20001"),
+                    ("server2","localhost:20002"),
+                    ("server3","localhost:20003"),
+                    ("server4","localhost:20004"),
+                    ("server5","localhost:20005"),
+                    ("server6","localhost:20006"),
+                    ("server7","localhost:20007"),
+                    ("client1","localhost:30000")]
+            memTests = (testsFor1 "mem" newMemoryTransport mem1Cfg)
+                ++ (testsFor3 "mem" newMemoryTransport mem3Cfg)
+                ++ (testsFor5 "mem" (newTCPTransport resolver) mem5Cfg)
+                ++ (testsFor7 "mem" (newTCPTransport resolver) mem7Cfg)
+            udpTests = (testsFor1 "udp" (newUDPTransport resolver) socket1Cfg)
+                ++ (testsFor3 "udp" (newUDPTransport resolver) socket3Cfg)
+                ++ (testsFor5 "udp" (newUDPTransport resolver) socket5Cfg)
+                ++ (testsFor7 "udp" (newUDPTransport resolver) socket7Cfg)
+            tcpTests = (testsFor1 "tcp" (newTCPTransport resolver) socket1Cfg) ++
+                (testsFor3 "tcp" (newTCPTransport resolver) socket3Cfg) ++
+                (testsFor5 "tcp" (newTCPTransport resolver) socket5Cfg) ++
+                (testsFor7 "tcp" (newTCPTransport resolver) socket7Cfg)
+            in memTests ++
+                udpTests ++
+                tcpTests
+
+testsFor1 :: String -> (IO Transport) -> RaftConfiguration -> [Test.Framework.Test]
+testsFor1 base transportF cfg =  [
+        testCase (nameTest base "performAction") $ testPerformAction transportF,
+        testCase (nameTest base "goPerformAction") $ testGoPerformAction transportF,
+        testCase (nameTest base "clientPerformAction") $ testClientPerformAction transportF cfg,
+        testCase (nameTest base "withClientPerformAction") $ testWithClientPerformAction transportF cfg
+        ]
+
+testsFor3 :: String -> (IO Transport) -> RaftConfiguration -> [Test.Framework.Test]
+testsFor3 base transportF cfg =  [
+        testCase (nameTest base "3cluster") $ test3Cluster transportF cfg,
+        testCase (nameTest base "3cluster-1nonparticipant") $ test3Cluster1NonParticipant transportF cfg,
+        testCase (nameTest base "3cluster-add1") $ test3ClusterAdd1 transportF cfg,
+        testCase (nameTest base "3cluster-stability") $ test3ClusterStability transportF cfg,
+        testCase (nameTest base "3cluster-1nonparticipant-stability") $ test3Cluster1NonParticipantStability transportF cfg,
+        testCase (nameTest base "client") $ testClient transportF cfg,
+        testCase (nameTest base "consistency") $ testConsistency transportF cfg,
+        testCase (nameTest base "2consistency") $ test2Consistency transportF cfg,
+        testCase (nameTest base "3consistency") $ test3Consistency transportF cfg,
+        testCase (nameTest base "10consistency") $ test10Consistency transportF cfg
+        ]
+
+testsFor5 :: String -> (IO Transport) -> RaftConfiguration -> [Test.Framework.Test]
+testsFor5 base transportF cfg = [
+        testCase (nameTest base "5cluster") $ test5Cluster transportF cfg,
+        testCase (nameTest base "5cluster-stability") $ test5ClusterStability transportF cfg,
+        testCase (nameTest base "5cluster-10consistency") $ test5Cluster10Consistency transportF cfg
+        ]
+
+testsFor7 :: String -> (IO Transport) -> RaftConfiguration -> [Test.Framework.Test]
+testsFor7 base transportF cfg = [
+        testCase (nameTest base "7cluster-10consistency") $ test7Cluster10Consistency transportF cfg
+        ]
+
+nameTest :: String -> String -> String
+nameTest base text = base ++ "-" ++ text
 
 troubleshoot :: IO () -> IO ()
 troubleshoot fn = do
@@ -85,21 +140,19 @@ troubleshoot fn = do
         updateGlobalLogger rootLoggerName (setLevel INFO)
         fn) (updateGlobalLogger rootLoggerName (setLevel WARNING))
 
-test3Cluster :: Assertion
-test3Cluster = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \vRafts -> do
+test3Cluster :: (IO Transport) -> RaftConfiguration -> Assertion
+test3Cluster transportF cfg = do
+    transport <- transportF
+    with3Servers transport cfg $ \vRafts -> do
         leader <- waitForLeader 5 (1 :: Integer) vRafts
         leaders <- allLeaders vRafts
         infoM _log $ "Leaders are " ++ (show leaders)
         _ <- checkForConsistency (1 :: Integer) leader vRafts
         return ()
 
-test3Cluster1NonParticipant :: Assertion
-test3Cluster1NonParticipant = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
+test3Cluster1NonParticipant :: (IO Transport) -> RaftConfiguration -> Assertion
+test3Cluster1NonParticipant transportF cfg = do
+    transport <- transportF
     with3Servers1NonParticipant transport cfg "server4" $ \vRafts -> do
         let mRafts = take 3 vRafts
         leader <- waitForLeader 5 (1 :: Integer) mRafts
@@ -108,10 +161,9 @@ test3Cluster1NonParticipant = do
         _ <- checkForConsistency (1 :: Integer) leader mRafts
         return ()
 
-test3ClusterAdd1 :: Assertion
-test3ClusterAdd1 = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
+test3ClusterAdd1 :: (IO Transport) -> RaftConfiguration -> Assertion
+test3ClusterAdd1 transportF cfg = do
+    transport <- transportF
     with3Servers1NonParticipant transport cfg "server4" $ \vRafts -> do
         let mRafts = take 3 vRafts
         leader <- waitForLeader 5 (1 :: Integer) mRafts
@@ -129,21 +181,19 @@ test3ClusterAdd1 = do
             _ <- checkForConsistency (1 :: Integer) leader vRafts
             return ()
 
-test3ClusterStability :: Assertion
-test3ClusterStability = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \vRafts -> do
+test3ClusterStability :: (IO Transport) -> RaftConfiguration -> Assertion
+test3ClusterStability transportF cfg = do
+    transport <- transportF
+    with3Servers transport cfg $ \vRafts -> do
         firstLeader <- waitForLeader 5 (1 :: Integer) vRafts
         _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         pause >> pause
         _ <- checkForConsistency (2 :: Integer) firstLeader vRafts
         return ()
 
-test3Cluster1NonParticipantStability :: Assertion
-test3Cluster1NonParticipantStability = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
+test3Cluster1NonParticipantStability :: (IO Transport) -> RaftConfiguration -> Assertion
+test3Cluster1NonParticipantStability transportF cfg = do
+    transport <- transportF
     with3Servers1NonParticipant  transport cfg "server4" $ \vRafts -> do
         let mRafts = take 3 vRafts
         firstLeader <- waitForLeader 5 (1 :: Integer) mRafts
@@ -152,31 +202,28 @@ test3Cluster1NonParticipantStability = do
         _ <- checkForConsistency (2 :: Integer) firstLeader mRafts
         return ()
 
-test5Cluster :: Assertion
-test5Cluster = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
-    with5Servers  transport cfg $ \vRafts -> do
+test5Cluster :: (IO Transport) -> RaftConfiguration -> Assertion
+test5Cluster transportF cfg = do
+    transport <- transportF
+    with5Servers transport cfg $ \vRafts -> do
         firstLeader <- waitForLeader 5 (1 :: Integer) vRafts
         _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         return ()
 
-test5ClusterStability :: Assertion
-test5ClusterStability = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
-    with5Servers  transport cfg $ \vRafts -> do
+test5ClusterStability :: (IO Transport) -> RaftConfiguration -> Assertion
+test5ClusterStability transportF cfg = do
+    transport <- transportF
+    with5Servers transport cfg $ \vRafts -> do
         firstLeader <- waitForLeader 5 (1 :: Integer) vRafts
         _ <- checkForConsistency (1 :: Integer) firstLeader vRafts
         pause >> pause >> pause
         _ <- checkForConsistency (2 :: Integer) firstLeader vRafts
         return ()
 
-testClient :: Assertion
-testClient = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \vRafts -> do
+testClient :: (IO Transport) -> RaftConfiguration -> Assertion
+testClient transportF cfg = do
+    transport <- transportF
+    with3Servers transport cfg $ \vRafts -> do
         pause
         errOrResult <- race (do 
                 _ <- waitForLeader 5 (1 :: Integer) vRafts
@@ -192,11 +239,10 @@ testClient = do
             Left _ -> do
                 assertBool "Performing action failed" False
 
-testConsistency :: Assertion
-testConsistency = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \vRafts -> do
+testConsistency :: (IO Transport) -> RaftConfiguration -> Assertion
+testConsistency transportF cfg = do
+    transport <- transportF
+    with3Servers transport cfg $ \vRafts -> do
         pause
         errOrResult <- race (do 
                 _ <- waitForLeader 5 (1 :: Integer) vRafts
@@ -215,11 +261,10 @@ testConsistency = do
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
 
-test2Consistency :: Assertion
-test2Consistency = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \vRafts -> do
+test2Consistency :: (IO Transport) -> RaftConfiguration -> Assertion
+test2Consistency transportF cfg = do
+    transport <- transportF
+    with3Servers transport cfg $ \vRafts -> do
         pause
         errOrResult <- race (do 
                 _ <- waitForLeader 5 (1 :: Integer) vRafts
@@ -239,11 +284,10 @@ test2Consistency = do
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
 
-test3Consistency :: Assertion
-test3Consistency = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \vRafts -> do
+test3Consistency :: (IO Transport) -> RaftConfiguration -> Assertion
+test3Consistency transportF cfg = do
+    transport <- transportF
+    with3Servers transport cfg $ \vRafts -> do
         pause
         errOrResult <- race (do 
                 _ <- waitForLeader 5 (1 :: Integer) vRafts
@@ -264,11 +308,10 @@ test3Consistency = do
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
 
-test10Consistency :: Assertion
-test10Consistency = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3"]
-    with3Servers  transport cfg $ \vRafts -> do
+test10Consistency :: (IO Transport) -> RaftConfiguration -> Assertion
+test10Consistency transportF cfg = do
+    transport <- transportF
+    with3Servers transport cfg $ \vRafts -> do
         pause
         errOrResult <- race (do 
                 _ <- waitForLeader 5 (1 :: Integer) vRafts
@@ -296,11 +339,10 @@ test10Consistency = do
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
 
-test5Cluster10Consistency :: Assertion
-test5Cluster10Consistency = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5"]
-    with5Servers  transport cfg $ \vRafts -> do
+test5Cluster10Consistency :: (IO Transport) -> RaftConfiguration -> Assertion
+test5Cluster10Consistency transportF cfg = do
+    transport <- transportF
+    with5Servers transport cfg $ \vRafts -> do
         pause
         errOrResult <- race (do 
                 _ <- waitForLeader 5 (1 :: Integer) vRafts
@@ -328,11 +370,10 @@ test5Cluster10Consistency = do
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
 
-test7Cluster10Consistency :: Assertion
-test7Cluster10Consistency = do
-    transport <- newMemoryTransport
-    let cfg = newTestConfiguration ["server1","server2","server3","server4","server5","server6","server7"]
-    with7Servers  transport cfg $ \vRafts -> do
+test7Cluster10Consistency :: (IO Transport) -> RaftConfiguration -> Assertion
+test7Cluster10Consistency transportF cfg = do
+    transport <- transportF
+    with7Servers transport cfg $ \vRafts -> do
         pause
         errOrResult <- race (do 
                 _ <- waitForLeader 10 (1 :: Integer) vRafts
@@ -360,48 +401,53 @@ test7Cluster10Consistency = do
             Right _ -> assertBool "" True
             Left _ -> assertBool "Performing action failed" False
 
-testPerformAction :: Assertion
-testPerformAction = do
+testPerformAction :: (IO Transport) -> Assertion
+testPerformAction transportF = do
+    transport <- transportF
     let client = "client1"
         server = "server1"
-    transport <- newMemoryTransport
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ reply -> do
-            reply MemberResult {
-                memberActionSuccess = True,
-                memberLeader = Nothing,
-                memberCurrentTerm = 0,
-                memberLastAppended = RaftTime 0 0,
-                memberLastCommitted = RaftTime 0 0
-                }
+        finally (do
+            onPerformAction endpoint server $ \_ reply -> do
+                reply MemberResult {
+                    memberActionSuccess = True,
+                    memberLeader = Nothing,
+                    memberCurrentTerm = 0,
+                    memberLastAppended = RaftTime 0 0,
+                    memberLastCommitted = RaftTime 0 0
+                    })
+            (unbindEndpoint_ endpoint server)
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
         action = Cmd $ encode $ Add 1
         outs = defaultTimeouts
-    Just msg <- callWithTimeout cs server "performAction" (timeoutRpc outs) $ encode action
-    let Right result = decode msg
-    assertBool "Result should be true" $ memberActionSuccess result
+    finally (do 
+        Just msg <- callWithTimeout cs server "performAction" (timeoutRpc outs) $ encode action
+        let Right result = decode msg
+        assertBool "Result should be true" $ memberActionSuccess result)
+        (unbindEndpoint_ endpoint client)
 
-testGoPerformAction :: Assertion
-testGoPerformAction = do
+testGoPerformAction :: (IO Transport) -> Assertion
+testGoPerformAction transportF = do
+    transport <- transportF
     let client = "client1"
         server = "server1"
-    transport <- newMemoryTransport
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ reply -> do
-            infoM _log $ "Returning result"
-            reply MemberResult {
-                memberActionSuccess = True,
-                memberLeader = Nothing,
-                memberCurrentTerm = 0,
-                memberLastAppended = RaftTime 0 0,
-                memberLastCommitted = RaftTime 0 0
-                }
+        finally (onPerformAction endpoint server $ \_ reply -> do
+                infoM _log $ "Returning result"
+                reply MemberResult {
+                    memberActionSuccess = True,
+                    memberLeader = Nothing,
+                    memberCurrentTerm = 0,
+                    memberLastAppended = RaftTime 0 0,
+                    memberLastCommitted = RaftTime 0 0
+                    })
+                (unbindEndpoint_ endpoint server)
     -- we have to wait a bit for server to start
     pause
     endpoint <- newEndpoint [transport]
@@ -412,54 +458,56 @@ testGoPerformAction = do
         cfg = raftcfg {
             clusterConfiguration = (clusterConfiguration raftcfg) {configurationLeader = Just server
             }}
-    response <- goPerformAction cs cfg server action
-    case response of
-        Just result -> assertBool "Result should be true" $ memberActionSuccess result
-        Nothing -> assertBool "No response" False
+    finally (do
+            response <- goPerformAction cs cfg server action
+            case response of
+                Just result -> assertBool "Result should be true" $ memberActionSuccess result
+                Nothing -> assertBool "No response" False)
+        (unbindEndpoint_ endpoint client)
 
-testClientPerformAction :: Assertion
-testClientPerformAction = do
+testClientPerformAction :: (IO Transport) -> RaftConfiguration -> Assertion
+testClientPerformAction transportF cfg = do
+    transport <- transportF
     let client = "client1"
         server = "server1"
-        cfg = newTestConfiguration [server]
-    transport <- newMemoryTransport
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ reply -> do
-            reply MemberResult {
-                memberActionSuccess = True,
-                memberLeader = Nothing,
-                memberCurrentTerm = 1,
-                memberLastAppended = RaftTime 1 1,
-                memberLastCommitted = RaftTime 1 1
-                }
+        finally (onPerformAction endpoint server $ \_ reply -> do
+                reply MemberResult {
+                    memberActionSuccess = True,
+                    memberLeader = Nothing,
+                    memberCurrentTerm = 1,
+                    memberLastAppended = RaftTime 1 1,
+                    memberLastCommitted = RaftTime 1 1
+                    })
+            (unbindEndpoint_ endpoint server)
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let raftClient = newClient endpoint client cfg
     let action = Cmd $ encode $ Add 1
-    result <- performAction raftClient action
-    assertBool "Result should be true" $ result == RaftTime 1 1
+    finally (do
+                result <- performAction raftClient action
+                assertBool "Result should be true" $ result == RaftTime 1 1)
+                (unbindEndpoint_ endpoint client)
 
-testWithClientPerformAction :: Assertion
-testWithClientPerformAction = do
+testWithClientPerformAction :: (IO Transport) -> RaftConfiguration -> Assertion
+testWithClientPerformAction transportF cfg = do
+    transport <- transportF
     let client = "client1"
         server = "server1"
-        cfg = newTestConfiguration [server]
-    transport <- newMemoryTransport
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        onPerformAction endpoint server $ \_ reply -> do
-            reply MemberResult {
-                memberActionSuccess = True,
-                memberLeader = Nothing,
-                memberCurrentTerm = 1,
-                memberLastAppended = RaftTime 1 1,
-                memberLastCommitted = RaftTime 1 1
-                }
-    endpoint <- newEndpoint [transport]
-    bindEndpoint_ endpoint client
+        finally (onPerformAction endpoint server $ \_ reply -> do
+                reply MemberResult {
+                    memberActionSuccess = True,
+                    memberLeader = Nothing,
+                    memberCurrentTerm = 1,
+                    memberLastAppended = RaftTime 1 1,
+                    memberLastCommitted = RaftTime 1 1
+                    })
+                (unbindEndpoint_ endpoint server)
     let action = Cmd $ encode $ Add 1
     result <- withClient transport client cfg $ \raftClient -> do
         pause
@@ -535,7 +583,8 @@ withClient transport name cfg fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
     let client = newClient endpoint name cfg
-    fn client
+    finally (fn client)
+        (unbindEndpoint_ endpoint name)
 
 hasCommon :: (Eq a,Ord a) => [a] -> Bool
 hasCommon values = let (_,count) = common values
@@ -561,11 +610,17 @@ common values = classify values M.empty
 newTestConfiguration :: [Name] -> RaftConfiguration
 newTestConfiguration members = (mkRaftConfiguration members) {clusterTimeouts = testTimeouts}
 
+newSocketTestConfiguration :: [Name] -> RaftConfiguration
+newSocketTestConfiguration members = (mkRaftConfiguration members) {clusterTimeouts = testSocketTimeouts}
+
 pause :: IO ()
 pause = threadDelay serverTimeout
 
 testTimeouts :: Timeouts
 testTimeouts = timeouts (25 * 1000)
+
+testSocketTimeouts :: Timeouts
+testSocketTimeouts = timeouts (150 * 1000)
 
 -- We need this to be high enough that members
 -- can complete their election processing (that's the longest timeout we have)
