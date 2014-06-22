@@ -18,7 +18,9 @@ maintainer:          phil@haphazardhouse.net
 -- copyright:
 category:            Control
 build-type:          Simple
-extra-source-files:  README.md
+extra-source-files:  README.md,
+                     changes.md
+
 cabal-version:       >=1.10
 
 library
