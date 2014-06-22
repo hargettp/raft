@@ -66,12 +66,12 @@ tests = let servers1 = ["server1"]
             servers7 = ["server1","server2","server3","server4","server5","server6","server7"]
             mem1Cfg = newTestConfiguration servers1
             mem3Cfg = newTestConfiguration servers3
-            socket1Cfg = newSocketTestConfiguration servers1
+            -- socket1Cfg = newSocketTestConfiguration servers1
             socket3Cfg = newSocketTestConfiguration servers3
             mem5Cfg = newTestConfiguration servers5
-            socket5Cfg = newSocketTestConfiguration servers5
+            -- socket5Cfg = newSocketTestConfiguration servers5
             mem7Cfg = newTestConfiguration servers7
-            socket7Cfg = newSocketTestConfiguration servers7
+            -- socket7Cfg = newSocketTestConfiguration servers7
             resolver = resolverFromList[
                     ("server1","localhost:20001"),
                     ("server2","localhost:20002"),
@@ -85,17 +85,21 @@ tests = let servers1 = ["server1"]
                 ++ (testsFor3 "mem" newMemoryTransport mem3Cfg)
                 ++ (testsFor5 "mem" (newTCPTransport resolver) mem5Cfg)
                 ++ (testsFor7 "mem" (newTCPTransport resolver) mem7Cfg)
-            udpTests = (testsFor1 "udp" (newUDPTransport resolver) socket1Cfg)
-                ++ (testsFor3 "udp" (newUDPTransport resolver) socket3Cfg)
-                ++ (testsFor5 "udp" (newUDPTransport resolver) socket5Cfg)
-                ++ (testsFor7 "udp" (newUDPTransport resolver) socket7Cfg)
-            tcpTests = (testsFor1 "tcp" (newTCPTransport resolver) socket1Cfg) ++
-                (testsFor3 "tcp" (newTCPTransport resolver) socket3Cfg) ++
-                (testsFor5 "tcp" (newTCPTransport resolver) socket5Cfg) ++
-                (testsFor7 "tcp" (newTCPTransport resolver) socket7Cfg)
+            -- udpTests = (testsFor1 "udp" (newUDPTransport resolver) socket1Cfg)
+            --    ++ (testsFor3 "udp" (newUDPTransport resolver) socket3Cfg)
+            --    ++ (testsFor5 "udp" (newUDPTransport resolver) socket5Cfg)
+            --    ++ (testsFor7 "udp" (newUDPTransport resolver) socket7Cfg)
+            limitedUdpTests = [testCase (nameTest "udp" "3cluster") $ test3Cluster (newUDPTransport resolver) socket3Cfg]
+            -- tcpTests = (testsFor1 "tcp" (newTCPTransport resolver) socket1Cfg) ++
+            --    (testsFor3 "tcp" (newTCPTransport resolver) socket3Cfg) ++
+            --    (testsFor5 "tcp" (newTCPTransport resolver) socket5Cfg) ++
+            --    (testsFor7 "tcp" (newTCPTransport resolver) socket7Cfg)
+            limitedTcpTests = [testCase (nameTest "tcp" "3cluster") $ test3Cluster (newTCPTransport resolver) socket3Cfg]
             in memTests ++
-                udpTests ++
-                tcpTests
+                -- udpTests ++
+                limitedUdpTests ++
+                -- tcpTests
+                limitedTcpTests
 
 testsFor1 :: String -> (IO Transport) -> RaftConfiguration -> [Test.Framework.Test]
 testsFor1 base transportF cfg =  [
