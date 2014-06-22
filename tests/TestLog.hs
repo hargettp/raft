@@ -38,8 +38,8 @@ import Test.Framework.Providers.HUnit
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-tests :: [Test.Framework.Test]
-tests = [
+tests :: IO [Test.Framework.Test]
+tests = return [
     testCase "new-log" testNewLog,
     testCase "empty-log" testEmptyLog,
     testCase "single-action" testSingleAction,

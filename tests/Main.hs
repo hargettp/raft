@@ -8,6 +8,7 @@ import qualified TestRaft as R
 
 -- external imports
 
+import Control.Applicative
 import Control.Concurrent
 
 import System.Directory
@@ -27,7 +28,8 @@ main :: IO ()
 main = do
   initLogging
   printPlatform
-  defaultMain tests
+  testsToRun <- tests
+  defaultMain testsToRun
 
 initLogging :: IO ()
 initLogging = do
@@ -49,8 +51,7 @@ printPlatform = do
     putStrLn $ "Capabilities: " ++ (show capabilities)
     putStrLn ""
 
-tests :: [Test.Framework.Test]
-tests = [
-    ]
-    ++ L.tests
-    ++ R.tests
+tests :: IO [Test.Framework.Test]
+tests = (++)
+    <$> L.tests
+    <*> R.tests
