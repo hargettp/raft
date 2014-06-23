@@ -1,10 +1,5 @@
 language: haskell
 
-env:
-  - RAFT_TRANSPORT=mem
-  - RAFT_TRANSPORT=udp
-  - RAFT_TRANSPORT=tcp
-
 ghc:
   - 7.8
   - 7.6
