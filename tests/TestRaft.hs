@@ -178,7 +178,7 @@ test3ClusterAdd1 transportF cfg = do
         infoM _log $ "Leaders are " ++ (show leaders)
         _ <- checkForConsistency (1 :: Integer) leader mRafts
         withClient transport "client1" cfg $ \client -> do
-            RaftTime _ clientIndex <- performAction client $ AddParticipants ["server4"]
+            RaftTime _ clientIndex <- performAction client $ Cfg $ AddParticipants ["server4"]
             assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
             _ <- waitForLeader 5 (2 :: Integer) vRafts
             newLeaders <- allLeaders vRafts

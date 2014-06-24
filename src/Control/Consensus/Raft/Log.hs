@@ -126,7 +126,7 @@ deriving instance Show (RaftState v)
 
 data RaftLogEntry =  RaftLogEntry {
     entryTerm :: Term,
-    entryAction :: Action
+    entryAction :: RaftAction
 } deriving (Eq,Show,Generic)
 
 instance Serialize RaftLogEntry

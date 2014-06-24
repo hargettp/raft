@@ -133,7 +133,7 @@ methodPerformAction = "performAction"
 goPerformAction :: CallSite
                     -> RaftConfiguration
                     -> Name
-                    -> Action
+                    -> RaftAction
                     -> IO (Maybe MemberResult)
 goPerformAction cs cfg member action = do
     maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ clusterTimeouts cfg) $ encode action
@@ -172,7 +172,7 @@ onRequestVote endpoint server fn = do
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: Endpoint -> Name -> (Action -> Reply MemberResult -> IO ()) -> IO ()
+onPerformAction :: Endpoint -> Name -> (RaftAction -> Reply MemberResult -> IO ()) -> IO ()
 onPerformAction endpoint member fn = do
     (bytes,reply) <- hear endpoint member methodPerformAction
     infoM _log $ "Heard performAction on " ++ member

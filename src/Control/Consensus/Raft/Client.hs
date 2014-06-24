@@ -59,7 +59,7 @@ newClient endpoint name cfg = Client {
 {-|
 Perform an 'Action' in the cluster.
 -}
-performAction :: Client -> Action -> IO RaftTime
+performAction :: Client -> RaftAction -> IO RaftTime
 performAction client action = do
     -- TODO consider whether there is an eventual timeout
     -- in case the cluster can't be reached

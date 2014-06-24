@@ -20,6 +20,7 @@
 module Data.Log (
 
     Index,
+    Command,
     Log(..),
     defaultCommitEntries,
     fetchLatestEntries,
@@ -30,6 +31,8 @@ module Data.Log (
 -- local imports
 
 -- external imports
+
+import qualified Data.ByteString as B
 
 import Prelude hiding (log)
 
@@ -105,6 +108,14 @@ class (Monad m,State s m e) => Log l m e s | l -> e,l -> s,l -> m where
     this point.
     -}
     checkpoint :: l -> s -> m (l, s)
+
+{-|
+Commands are the specific operations applied to 'Control.Consensus.Log.State's
+to transform them into a new 'Control.Consensus.Log.State'. They are represented
+here in their completely typeless form as a 'B.ByteString', because that's the
+most concrete description of them.
+-}
+type Command = B.ByteString
 
 {-|
 'Log's operate on 'State': that is, when committing, the log applies each

@@ -291,7 +291,7 @@ lead vRaft = do
                 doServe vRaft actions,
                 doPerform vRaft actions clients]
 
-type Actions = Mailbox (Maybe (Action,Reply MemberResult))
+type Actions = Mailbox (Maybe (RaftAction,Reply MemberResult))
 type Clients = Mailbox (Index,Reply MemberResult)
 
 doPulse :: (RaftLog l v) => Raft l v -> Actions -> IO ()
@@ -359,10 +359,10 @@ append vRaft actions clients = do
                 nextIndex = (lastAppended oldLog) + 1
                 revisedAction = case action of
                     Cmd _ -> action
-                    cfgAction -> SetConfiguration $ applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldState) cfgAction
+                    cfgAction -> Cfg $ SetConfiguration $ applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldState) cfgAction
             newLog <- appendEntries oldLog nextIndex [RaftLogEntry term revisedAction]
             (revisedLog,revisedState) <- case revisedAction of
-                SetConfiguration newCfg -> do
+                Cfg (SetConfiguration newCfg) -> do
                     let newState = oldState {
                         raftStateConfiguration = (raftStateConfiguration oldState) {
                             clusterConfiguration = newCfg
@@ -426,7 +426,7 @@ commit vRaft clients = do
                                     JointConfiguration _ jointNew -> jointNew
                                     newCfg -> newCfg
                             revisedLog <- appendEntries newLog ((lastAppended newLog) + 1)
-                                    [RaftLogEntry (raftStateCurrentTerm newState) (SetConfiguration revisedCfg)]
+                                    [RaftLogEntry (raftStateCurrentTerm newState) (Cfg $ SetConfiguration revisedCfg)]
                             let revisedState = newState {raftStateConfigurationIndex = Nothing}
                             return (revisedLog,revisedState)
                         else return (newLog,newState)

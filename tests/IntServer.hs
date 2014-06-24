@@ -30,7 +30,6 @@ module IntServer (
 -- local imports
 
 import Data.Log
-import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Types
 
@@ -88,7 +87,7 @@ mkIntLog = do
     }
 
 instance State IntState IO Command where
-    -- canApplyEntry :: s -> Index -> e -> m Bool
+
     canApplyEntry _ _ _ = return True
 
     applyEntry initial _ cmd = do

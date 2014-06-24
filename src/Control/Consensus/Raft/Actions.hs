@@ -1,8 +1,9 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Control.Consensus.Raft.Actions
+-- Module      :  Control.Consensus.Raft.RaftActions
 -- Copyright   :  (c) Phil Hargett 2014
 -- License     :  MIT (see LICENSE file)
 -- 
@@ -16,8 +17,8 @@
 
 module Control.Consensus.Raft.Actions (
     -- * Actions
-    Action(..),
-    Command,
+    RaftAction(..),
+    ConfigurationCommand(..),
     isCommandAction,
     isConfigurationAction,
     -- * Configuration actions
@@ -28,9 +29,10 @@ module Control.Consensus.Raft.Actions (
 
 import Control.Consensus.Raft.Types
 
+import Data.Log
+
 -- external imports
 
-import qualified Data.ByteString as B
 import Data.Serialize
 
 import GHC.Generics
@@ -40,28 +42,27 @@ import Network.Endpoints
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-
-data Action = AddParticipants [Name]
+data ConfigurationCommand = AddParticipants [Name]
     | RemoveParticipants [Name]
     | SetConfiguration Configuration
-    | Cmd Command
     deriving (Eq,Show,Generic)
 
-instance Serialize Action
+instance Serialize ConfigurationCommand
 
-{-|
-Commands are the specific operations applied to 'Control.Consensus.Log.State's
-to transform them into a new 'Control.Consensus.Log.State'. They are represented
-here in their completely typeless form as a 'B.ByteString', because that's the
-most concrete description of them.
--}
-type Command = B.ByteString
+data RaftAction = Cfg ConfigurationCommand
+    | Cmd Command
+    deriving (Generic)
 
-isCommandAction :: Action -> Bool
+deriving instance Eq RaftAction
+deriving instance Show RaftAction
+
+instance Serialize RaftAction
+
+isCommandAction :: RaftAction -> Bool
 isCommandAction (Cmd _) = True
 isCommandAction _ = False
 
-isConfigurationAction :: Action -> Bool
+isConfigurationAction :: RaftAction -> Bool
 isConfigurationAction = not . isCommandAction
 
 --------------------------------------------------------------------------------
@@ -72,14 +73,12 @@ isConfigurationAction = not . isCommandAction
 Apply the 'Action' to the 'Configuration', if it is a configuration change; otherwise,
 leave the configuration unchanged
 -}
-applyConfigurationAction :: Configuration -> Action -> Configuration
--- Common
-applyConfigurationAction _ (SetConfiguration cfg) = cfg
--- Joint config
-applyConfigurationAction (JointConfiguration jointOld jointNew) (AddParticipants participants) = JointConfiguration jointOld $ addClusterParticipants jointNew participants
-applyConfigurationAction (JointConfiguration jointOld jointNew) (RemoveParticipants participants) = JointConfiguration jointOld $ removeClusterParticipants jointNew participants
-applyConfigurationAction (JointConfiguration jointOld jointNew) _ = JointConfiguration jointOld jointNew
--- Single config
-applyConfigurationAction initial (AddParticipants participants) = JointConfiguration initial $ addClusterParticipants initial participants
-applyConfigurationAction initial (RemoveParticipants participants) = JointConfiguration initial $ removeClusterParticipants initial participants
-applyConfigurationAction initial _ = initial
+applyConfigurationAction :: Configuration -> RaftAction -> Configuration
+applyConfigurationAction cfg (Cfg cmd) = applyConfigurationCommand cfg cmd
+applyConfigurationAction cfg (Cmd _) = cfg
+
+applyConfigurationCommand :: Configuration -> ConfigurationCommand -> Configuration
+applyConfigurationCommand _ (SetConfiguration cfg) = cfg
+applyConfigurationCommand (JointConfiguration jointOld jointNew) cmd = JointConfiguration jointOld (applyConfigurationCommand jointNew cmd)
+applyConfigurationCommand initial (AddParticipants participants) = addClusterParticipants initial participants
+applyConfigurationCommand initial (RemoveParticipants participants) = removeClusterParticipants initial participants
