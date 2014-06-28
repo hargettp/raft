@@ -124,8 +124,8 @@ entry operates within a chosen 'Monad', so implementers are free to implement
 'State' as needed (e.g., use 'IO', 'STM', etc.).
 -}
 class (Monad m) => State s m e where
-    canApplyEntry :: s -> Index -> e -> m Bool
-    applyEntry :: s -> Index -> e -> m s
+    canApplyEntry :: s -> e -> m Bool
+    applyEntry :: s -> e -> m s
 
 {-|
 An 'Index' is a logical offset into a 'Log'.
@@ -154,11 +154,11 @@ defaultCommitEntries initialLog index initialState = do
         commit oldLog oldState _ [] = do
             return (oldLog,oldState)
         commit oldLog oldState commitIndex (entry:rest) = do
-            can <- canApplyEntry oldState commitIndex entry
+            can <- canApplyEntry oldState entry
             if can
                 then do
                     newLog <- commitEntry oldLog commitIndex entry
-                    newState <- applyEntry oldState commitIndex entry
+                    newState <- applyEntry oldState entry
                     commit newLog newState (commitIndex + 1)  rest
                 else return (oldLog,oldState)
 

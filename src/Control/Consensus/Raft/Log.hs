@@ -132,7 +132,7 @@ data RaftLogEntry =  RaftLogEntry {
 instance Serialize RaftLogEntry
 
 instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
-    canApplyEntry oldRaftState index entry = do
+    canApplyEntry oldRaftState entry = do
         let members = raftStateMembers oldRaftState
             cfg = raftStateConfiguration oldRaftState
             term = membersSafeAppendedTerm members $ clusterConfiguration cfg
@@ -147,15 +147,15 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
         where
             canApply (Cmd cmd) = do
                 let oldData = raftStateData oldRaftState
-                canApplyEntry oldData index cmd
+                canApplyEntry oldData cmd
             -- TODO check configuration cases
             canApply _ = return True
 
-    applyEntry oldRaftState index entry = applyAction $ entryAction entry
+    applyEntry oldRaftState entry = applyAction $ entryAction entry
         where
             applyAction (Cmd cmd) = do
                 let oldData = raftStateData oldRaftState
-                newData <- applyEntry oldData index cmd
+                newData <- applyEntry oldData cmd
                 return $ oldRaftState {raftStateData = newData}
             applyAction action = do
                 let cfg = applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldRaftState) action

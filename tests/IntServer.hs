@@ -88,9 +88,9 @@ mkIntLog = do
 
 instance State IntState IO Command where
 
-    canApplyEntry _ _ _ = return True
+    canApplyEntry _ _ = return True
 
-    applyEntry initial _ cmd = do
+    applyEntry initial cmd = do
         let Right icmd = decode cmd
         applyIntCommand initial icmd
 
