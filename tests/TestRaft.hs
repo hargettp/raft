@@ -178,7 +178,7 @@ test3ClusterAdd1 transportF cfg = do
         infoM _log $ "Leaders are " ++ (show leaders)
         _ <- checkForConsistency (1 :: Integer) leader mRafts
         withClient transport "client1" cfg $ \client -> do
-            RaftTime _ clientIndex <- performAction client $ Cfg $ AddParticipants ["server4"]
+            RaftTime _ clientIndex <- performAction client $ ((Cfg $ AddParticipants ["server4"]) :: RaftAction IntCommand)
             assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
             _ <- waitForLeader 5 (2 :: Integer) vRafts
             newLeaders <- allLeaders vRafts
@@ -238,7 +238,7 @@ testClient transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
-                                performAction client $ Cmd $ encode $ Add 1)
+                                performAction client $ Cmd $ Add 1)
         case errOrResult of
             Right clientResult -> do
                 let RaftTime _ clientIndex = clientResult
@@ -257,7 +257,7 @@ testConsistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 1
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 1
                                 assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
@@ -279,8 +279,8 @@ test2Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Multiply 5
+                                _ <- performAction client $ Cmd $ Add 3
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ Multiply 5
                                 assertBool  (printf "Client index should be 1: %v" (show clientIndex)) $ clientIndex == 1
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
@@ -302,9 +302,9 @@ test3Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Subtract 2
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ Subtract 2
                                 assertBool  (printf "Client index should be 2: %v" (show clientIndex)) $ clientIndex == 2
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
@@ -326,16 +326,16 @@ test10Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
@@ -357,16 +357,16 @@ test5Cluster10Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 5 (1 :: Integer) vRafts
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
@@ -388,16 +388,16 @@ test7Cluster10Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader 10 (1 :: Integer) vRafts
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                _ <- performAction client $ Cmd $ encode $ Add 3
-                                _ <- performAction client $ Cmd $ encode $ Multiply 5
-                                _ <- performAction client $ Cmd $ encode $ Subtract 2
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ encode $ Add 3
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                _ <- performAction client $ Cmd $ Add 3
+                                _ <- performAction client $ Cmd $ Multiply 5
+                                _ <- performAction client $ Cmd $ Subtract 2
+                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
                                 -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
@@ -417,7 +417,7 @@ testPerformAction transportF = do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
         finally (do
-            onPerformAction endpoint server $ \_ reply -> do
+            onPassAction endpoint server $ \reply -> do
                 reply MemberResult {
                     memberActionSuccess = True,
                     memberLeader = Nothing,
@@ -429,7 +429,7 @@ testPerformAction transportF = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
-        action = Cmd $ encode $ Add 1
+        action = Cmd $ Add 1
         outs = defaultTimeouts
     finally (do 
         Just msg <- callWithTimeout cs server "performAction" (timeoutRpc outs) $ encode action
@@ -445,7 +445,7 @@ testGoPerformAction transportF = do
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        finally (onPerformAction endpoint server $ \_ reply -> do
+        finally (onPassAction endpoint server $ \reply -> do
                 infoM _log $ "Returning result"
                 reply MemberResult {
                     memberActionSuccess = True,
@@ -460,7 +460,7 @@ testGoPerformAction transportF = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let cs = newCallSite endpoint client
-        action = Cmd $ encode $ Add 1
+        action = Cmd $ Add 1
         raftcfg = newTestConfiguration [server]
         cfg = raftcfg {
             clusterConfiguration = (clusterConfiguration raftcfg) {configurationLeader = Just server
@@ -480,7 +480,7 @@ testClientPerformAction transportF cfg = do
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        finally (onPerformAction endpoint server $ \_ reply -> do
+        finally (onPassAction endpoint server $ \reply -> do
                 reply MemberResult {
                     memberActionSuccess = True,
                     memberLeader = Nothing,
@@ -492,7 +492,7 @@ testClientPerformAction transportF cfg = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let raftClient = newClient endpoint client cfg
-    let action = Cmd $ encode $ Add 1
+    let action = Cmd $ Add 1
     finally (do
                 result <- performAction raftClient action
                 assertBool "Result should be true" $ result == RaftTime 1 1)
@@ -506,7 +506,7 @@ testWithClientPerformAction transportF cfg = do
     _ <- async $ do
         endpoint <- newEndpoint [transport]
         bindEndpoint_ endpoint server
-        finally (onPerformAction endpoint server $ \_ reply -> do
+        finally (onPassAction endpoint server $ \reply -> do
                 reply MemberResult {
                     memberActionSuccess = True,
                     memberLeader = Nothing,
@@ -515,7 +515,7 @@ testWithClientPerformAction transportF cfg = do
                     memberLastCommitted = RaftTime 1 1
                     })
                 (unbindEndpoint_ endpoint server)
-    let action = Cmd $ encode $ Add 1
+    let action = Cmd $ Add 1
     result <- withClient transport client cfg $ \raftClient -> do
         pause
         performAction raftClient action
@@ -525,19 +525,19 @@ testWithClientPerformAction transportF cfg = do
 -- helpers
 --------------------------------------------------------------------------------
 
-checkForConsistency_ :: [Raft IntLog IntState] -> IO (Maybe Name)
+checkForConsistency_ :: [Raft IntLog IntCommand IntState] -> IO (Maybe Name)
 checkForConsistency_ rafts = checkForConsistency 1 Nothing rafts
 
-checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntState] -> IO (Maybe Name)
+checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntCommand IntState] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
     let leaders = map (clusterLeader . clusterConfiguration . raftStateConfiguration . raftState) rafts
         results = map (raftStateData . raftState) rafts
         indexes = map (lastCommitted . raftLog) rafts
-    assertBool (printf "%d: Most results should be equal" (show run)) $ hasCommon results
-    assertBool (printf "%d: Most log indexes should be equal" (show run)) $ hasCommon indexes
-    assertBool (printf "%d: Most members should have same leader: %s" (show run) (show leaders)) $ hasCommon leaders
-    assertBool (printf "%d: There must be a leader %s" (show run) (show leaders)) $ all (/= Nothing) leaders
+    assertBool (printf "%d: Most results should be equal" run) $ hasCommon results
+    assertBool (printf "%d: Most log indexes should be equal" run) $ hasCommon indexes
+    assertBool (printf "%d: Most members should have same leader: %s" run (show leaders)) $ hasCommon leaders
+    assertBool (printf "%d: There must be a leader %s" run (show leaders)) $ all (/= Nothing) leaders
     let leader = (leaders !! 0)
     case possibleLeader of
         Just _ -> if all (== possibleLeader) leaders
@@ -547,7 +547,7 @@ checkForConsistency run possibleLeader vRafts = do
                         then return leader
                         else return Nothing
 
-waitForLeader :: Integer -> Integer -> [Raft IntLog IntState] -> IO (Maybe Name)
+waitForLeader :: Integer -> Integer -> [Raft IntLog IntCommand IntState] -> IO (Maybe Name)
 waitForLeader maxCount attempt vRafts = do
     leaders <- allLeaders vRafts
     let leader = leaders !! 0
@@ -567,19 +567,19 @@ waitForLeader maxCount attempt vRafts = do
                 else
                     waitForLeader (maxCount - 1) (attempt + 1) vRafts
 
-allLeaders :: [Raft IntLog IntState] -> IO [Maybe Name]
+allLeaders :: [Raft IntLog IntCommand IntState] -> IO [Maybe Name]
 allLeaders vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
     let leaders = map (clusterLeader . clusterConfiguration . raftStateConfiguration . raftState) rafts
     return leaders
 
-allStates :: [Raft IntLog IntState] -> IO [IntState]
+allStates :: [Raft IntLog IntCommand IntState] -> IO [IntState]
 allStates vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
     let states = map (raftStateData . raftState) rafts
     return states
 
-allLastCommitted :: [Raft IntLog IntState] -> IO [Index]
+allLastCommitted :: [Raft IntLog IntCommand IntState] -> IO [Index]
 allLastCommitted vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
     let committed = map (lastCommitted . raftLog) rafts

@@ -22,7 +22,7 @@ module IntServer (
     IntCommand(..),
     IntRaft,
     IntLogEntry(..),
-    IntLog,
+    IntLog(..),
     IntState(..),
     mkIntLog
 ) where
@@ -48,7 +48,7 @@ data IntCommand = Add Int
     | Subtract Int
     | Multiply Int
     | Divide Int
-    deriving (Generic,Show)
+    deriving (Generic,Eq,Show)
 
 instance Serialize IntCommand
 
@@ -71,10 +71,10 @@ instance Serialize IntLogEntry
 data IntLog = IntLog {
     numberLogLastCommitted :: RaftTime,
     numberLogLastAppended :: RaftTime,
-    numberLogEntries :: [RaftLogEntry]
+    numberLogEntries :: [RaftLogEntry IntCommand]
 } deriving (Show)
 
-instance RaftLog IntLog IntState where
+instance RaftLog IntLog IntCommand IntState where
     lastAppendedTime = numberLogLastAppended
     lastCommittedTime = numberLogLastCommitted
 
@@ -86,15 +86,16 @@ mkIntLog = do
         numberLogEntries = []
     }
 
-instance State IntState IO Command where
+instance Command IntCommand
+
+instance State IntState IO IntCommand where
 
     canApplyEntry _ _ = return True
 
     applyEntry initial cmd = do
-        let Right icmd = decode cmd
-        applyIntCommand initial icmd
+        applyIntCommand initial cmd
 
-instance Log IntLog IO RaftLogEntry (RaftState IntState) where
+instance Log IntLog IO (RaftLogEntry IntCommand) (RaftState IntState) where
 
     lastCommitted log = logIndex $ numberLogLastCommitted log
 
@@ -121,4 +122,4 @@ instance Log IntLog IO RaftLogEntry (RaftState IntState) where
 
     checkpoint oldLog oldState = return (oldLog,oldState)
 
-type IntRaft = Raft IntLog IntState
+type IntRaft = Raft IntLog IntCommand IntState

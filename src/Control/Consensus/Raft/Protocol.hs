@@ -35,6 +35,7 @@ module Control.Consensus.Raft.Protocol (
 
     -- * Member handlers
     onPerformAction,
+    onPassAction,
     onAppendEntries,
     onRequestVote
 
@@ -46,6 +47,8 @@ import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
+
+import Data.Log
 
 -- external imports
 
@@ -65,15 +68,31 @@ import System.Log.Logger
 _log :: String
 _log = "raft.protocol"
 
-data AppendEntries =  AppendEntries {
+data AppendEntries c = (Command c) => AppendEntries {
     aeLeader :: Name,
     aeLeaderTerm :: Term,
     aePreviousTime :: RaftTime,
     aeCommittedTime :: RaftTime,
-    aeEntries :: [RaftLogEntry]
-} deriving (Eq,Show,Generic)
+    aeEntries :: [RaftLogEntry c]
+}
 
-instance Serialize AppendEntries
+deriving instance (Command c) => Eq (AppendEntries c)
+deriving instance (Command c) => Show (AppendEntries c)
+
+instance (Command c) => Serialize (AppendEntries c) where
+    get = do
+        leader <- get
+        term <- get
+        previous <- get
+        committed <- get
+        entries <- get
+        return $ AppendEntries leader term previous committed entries
+    put ae = do
+        put $ aeLeader ae
+        put $ aeLeaderTerm ae
+        put $ aePreviousTime ae
+        put $ aeCommittedTime ae
+        put $ aeEntries ae
 
 data RequestVote = RequestVote {
         rvCandidate :: Name,
@@ -86,12 +105,12 @@ instance Serialize RequestVote
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
-goAppendEntries :: CallSite
+goAppendEntries :: (Command c) => CallSite
             -> RaftConfiguration            -- ^^ Cluster configuration
             -> Term                     -- ^^ Leader's current term
             -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
             -> RaftTime                 -- ^^ Last index up to which all entries are committed on leader
-            -> [RaftLogEntry]    -- ^^ Entries to append
+            -> [RaftLogEntry c]    -- ^^ Entries to append
             -> IO (M.Map Name (Maybe MemberResult))
 goAppendEntries cs cfg term prevTime commitTime entries = do
     let Just leader = clusterLeader $ clusterConfiguration cfg
@@ -130,10 +149,10 @@ goRequestVote cs cfg term candidate lastEntryTime = do
 methodPerformAction :: String
 methodPerformAction = "performAction"
 
-goPerformAction :: CallSite
+goPerformAction :: (Command c) => CallSite
                     -> RaftConfiguration
                     -> Name
-                    -> RaftAction
+                    -> RaftAction c
                     -> IO (Maybe MemberResult)
 goPerformAction cs cfg member action = do
     maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ clusterTimeouts cfg) $ encode action
@@ -147,7 +166,7 @@ goPerformAction cs cfg member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: Endpoint -> RaftConfiguration -> Name -> (AppendEntries -> IO MemberResult) -> IO (Maybe Name)
+onAppendEntries :: (Command c) => Endpoint -> RaftConfiguration -> Name -> (AppendEntries c-> IO MemberResult) -> IO (Maybe Name)
 onAppendEntries endpoint cfg server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ clusterTimeouts cfg)
     case msg of
@@ -172,10 +191,20 @@ onRequestVote endpoint server fn = do
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: Endpoint -> Name -> (RaftAction -> Reply MemberResult -> IO ()) -> IO ()
+onPerformAction :: (Command c) => Endpoint -> Name -> (RaftAction c -> Reply MemberResult -> IO ()) -> IO ()
 onPerformAction endpoint member fn = do
     (bytes,reply) <- hear endpoint member methodPerformAction
     infoM _log $ "Heard performAction on " ++ member
     let Right action = decode bytes
     fn action (\response -> reply $ encode response)
+    return ()
+
+{-|
+Wait for a request from a client to perform an action, but pass on performing the action
+-}
+onPassAction :: Endpoint -> Name -> (Reply MemberResult -> IO ()) -> IO ()
+onPassAction endpoint member fn = do
+    (_,reply) <- hear endpoint member methodPerformAction
+    infoM _log $ "Heard performAction on " ++ member
+    fn $ \response -> reply $ encode response
     return ()

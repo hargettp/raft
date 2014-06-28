@@ -27,7 +27,6 @@ import IntServer
 -- external imports
 
 import Data.Log
-import Data.Serialize
 
 import Prelude hiding (log)
 
@@ -62,7 +61,7 @@ testSingleAction :: Assertion
 testSingleAction = do
     log <- mkIntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2)]
-    log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2)]
+    log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ (Add 2)]
     let val = mkRaftState (IntState 1) (mkRaftConfiguration []) "server1"
     entries <- fetchEntries log1 0 1
     let lastIndex = lastAppended log1
@@ -77,7 +76,7 @@ testDoubleAction :: Assertion
 testDoubleAction = do
     log <- mkIntLog
     -- log1 <- appendEntries log 0 [IntLogEntry (Add 2),IntLogEntry (Multiply 5)]
-    log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ encode (Add 2),RaftLogEntry 1 $ Cmd $ encode (Multiply 5)]
+    log1 <- appendEntries log 0 [RaftLogEntry 1 $ Cmd $ (Add 2),RaftLogEntry 1 $ Cmd $ (Multiply 5)]
     let val = mkRaftState (IntState 1) (mkRaftConfiguration []) "server1"
     entries <- fetchEntries log1 0 2
     assertBool "Log should not be empty" (not $ null entries)

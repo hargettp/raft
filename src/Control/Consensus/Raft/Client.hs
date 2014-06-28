@@ -28,6 +28,8 @@ import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Types
 
+import Data.Log
+
 -- external imports
 
 import Control.Concurrent
@@ -59,7 +61,7 @@ newClient endpoint name cfg = Client {
 {-|
 Perform an 'Action' in the cluster.
 -}
-performAction :: Client -> RaftAction -> IO RaftTime
+performAction :: (Command c) => Client -> RaftAction c -> IO RaftTime
 performAction client action = do
     -- TODO consider whether there is an eventual timeout
     -- in case the cluster can't be reached

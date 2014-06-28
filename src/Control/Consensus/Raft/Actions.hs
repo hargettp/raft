@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
 -----------------------------------------------------------------------------
@@ -49,20 +50,34 @@ data ConfigurationCommand = AddParticipants [Name]
 
 instance Serialize ConfigurationCommand
 
-data RaftAction = Cfg ConfigurationCommand
-    | Cmd Command
-    deriving (Generic)
+data RaftAction c = (Command c) => Cfg ConfigurationCommand
+    | Cmd c
 
-deriving instance Eq RaftAction
-deriving instance Show RaftAction
+deriving instance (Command c) => Eq (RaftAction c)
+deriving instance (Command c) => Show (RaftAction c)
 
-instance Serialize RaftAction
+instance (Command c) => Serialize (RaftAction c) where
+    get = do
+        kind <- getWord8
+        case kind of
+            0 -> do
+                cfg <- get
+                return $ Cfg cfg
+            _ -> do
+                cmd <- get
+                return $ Cmd cmd
+    put (Cfg cfg) = do
+        putWord8 0
+        put cfg
+    put (Cmd cmd) = do
+        putWord8 1
+        put cmd
 
-isCommandAction :: RaftAction -> Bool
+isCommandAction :: (Command c) => RaftAction c -> Bool
 isCommandAction (Cmd _) = True
 isCommandAction _ = False
 
-isConfigurationAction :: RaftAction -> Bool
+isConfigurationAction :: (Command c) => RaftAction c -> Bool
 isConfigurationAction = not . isCommandAction
 
 --------------------------------------------------------------------------------
@@ -73,7 +88,7 @@ isConfigurationAction = not . isCommandAction
 Apply the 'Action' to the 'Configuration', if it is a configuration change; otherwise,
 leave the configuration unchanged
 -}
-applyConfigurationAction :: Configuration -> RaftAction -> Configuration
+applyConfigurationAction :: (Command c) => Configuration -> RaftAction c -> Configuration
 applyConfigurationAction cfg (Cfg cmd) = applyConfigurationCommand cfg cmd
 applyConfigurationAction cfg (Cmd _) = cfg
 

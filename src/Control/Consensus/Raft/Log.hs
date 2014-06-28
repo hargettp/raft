@@ -56,8 +56,6 @@ import Control.Concurrent.STM
 import qualified Data.Map as M
 import Data.Serialize
 
-import GHC.Generics
-
 import Network.Endpoints
 
 import System.Log.Logger
@@ -75,15 +73,15 @@ Encapsulates the state necessary for the Raft algorithm, depending
 on a 'RaftServer' for customizing the use of the algorithm to a 
 specific application.
 -}
-data RaftContext l v = (RaftLog l v) => RaftContext {
+data RaftContext l c v = (RaftLog l c v) => RaftContext {
     raftEndpoint :: Endpoint,
     raftLog :: l,
     raftState :: RaftState v
 }
 
-data Raft l v = (RaftLog l v,Serialize v) => Raft {raftContext :: TVar (RaftContext l v)}
+data Raft l c v = (RaftLog l c v,Serialize v) => Raft {raftContext :: TVar (RaftContext l c v)}
 
-mkRaft :: (RaftLog l v) => Endpoint -> l -> RaftState v -> STM (Raft l v)
+mkRaft :: (RaftLog l c v) => Endpoint -> l -> RaftState v -> STM (Raft l c v)
 mkRaft endpoint initialLog initialState = do
     ctx <- newTVar $ RaftContext {
         raftEndpoint = endpoint,
@@ -95,7 +93,7 @@ mkRaft endpoint initialLog initialState = do
 {-|
 A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
 -}
-class (Eq v,Show v,Serialize v,Log l IO RaftLogEntry (RaftState v)) => RaftLog l v where
+class (Eq v,Show v,Serialize v,Command c,Log l IO (RaftLogEntry c) (RaftState v)) => RaftLog l c v where
     lastAppendedTime :: l -> RaftTime
     lastCommittedTime :: l -> RaftTime
 
@@ -124,14 +122,24 @@ mkRaftState initialData cfg name = RaftState {
 deriving instance Eq (RaftState v)
 deriving instance Show (RaftState v)
 
-data RaftLogEntry =  RaftLogEntry {
+data RaftLogEntry c =  (Command c) => RaftLogEntry {
     entryTerm :: Term,
-    entryAction :: RaftAction
-} deriving (Eq,Show,Generic)
+    entryAction :: RaftAction c
+}
 
-instance Serialize RaftLogEntry
+deriving instance (Command c) => Eq (RaftLogEntry c)
+deriving instance (Command c) => Show (RaftLogEntry c)
 
-instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
+instance (Command c) => Serialize (RaftLogEntry c) where
+    get = do
+        term <- get
+        action <- get
+        return $ RaftLogEntry term action
+    put (RaftLogEntry term action) = do
+        put term
+        put action
+
+instance (Command c,State v IO c) => State (RaftState v) IO (RaftLogEntry c) where
     canApplyEntry oldRaftState entry = do
         let members = raftStateMembers oldRaftState
             cfg = raftStateConfiguration oldRaftState
@@ -166,16 +174,16 @@ instance (State v IO Command) => State (RaftState v) IO RaftLogEntry where
                     }
                 }
 
-raftCurrentTerm :: (RaftLog l v) => RaftContext l v -> Term
+raftCurrentTerm :: (RaftLog l c v) => RaftContext l c v -> Term
 raftCurrentTerm raft = raftStateCurrentTerm $ raftState raft
 
-raftName :: (RaftLog l v) => RaftContext l v -> Name
+raftName :: (RaftLog l c v) => RaftContext l c v -> Name
 raftName raft = raftStateName $ raftState raft
 
 {-|
 Update the current term in a new 'RaftContext'
 -}
-setRaftTerm :: Term -> RaftContext l v -> RaftContext l v
+setRaftTerm :: Term -> RaftContext l c v -> RaftContext l c v
 setRaftTerm term raft = raft {
         raftState = (raftState raft) {
             raftStateCurrentTerm = term
@@ -185,17 +193,17 @@ setRaftTerm term raft = raft {
 {-|
 Update the current term in a new 'RaftContext'
 -}
-setRaftMembers :: Members -> RaftContext l v -> RaftContext l v
+setRaftMembers :: Members -> RaftContext l c v -> RaftContext l c v
 setRaftMembers members raft = raft {
         raftState = (raftState raft) {
             raftStateMembers = members
             }
         }
 
-raftMembers :: (RaftLog l v) => RaftContext l v -> Members
+raftMembers :: (RaftLog l c v) => RaftContext l c v -> Members
 raftMembers raft = raftStateMembers $ raftState raft
 
-raftSafeAppendedTerm :: (RaftLog l v) => RaftContext l v -> Term
+raftSafeAppendedTerm :: (RaftLog l c v) => RaftContext l c v -> Term
 raftSafeAppendedTerm raft = 
     let members = raftMembers raft
         cfg = raftConfiguration raft
@@ -204,7 +212,7 @@ raftSafeAppendedTerm raft =
 {-|
 Update the last candidate in a new 'RaftContext'
 -}
-setRaftLastCandidate :: Maybe Name -> RaftContext l v -> RaftContext l v
+setRaftLastCandidate :: Maybe Name -> RaftContext l c v -> RaftContext l c v
 setRaftLastCandidate candidate raft = raft {
                     raftState = (raftState raft) {
                         raftStateLastCandidate = candidate
@@ -214,7 +222,7 @@ setRaftLastCandidate candidate raft = raft {
 {-|
 Update the 'RaftState' in a new 'RaftContext' to specify a new leader
 -}
-setRaftLeader :: Maybe Name -> RaftContext l v -> RaftContext l v
+setRaftLeader :: Maybe Name -> RaftContext l c v -> RaftContext l c v
 setRaftLeader leader raft = 
     let cfg = clusterConfiguration $ raftStateConfiguration $ raftState raft
         in case cfg of
@@ -233,15 +241,15 @@ setRaftLeader leader raft =
                         }}}
                 }
 
-isRaftLeader :: (RaftLog l v) => RaftContext l v -> Bool
+isRaftLeader :: (RaftLog l c v) => RaftContext l c v -> Bool
 isRaftLeader raft = (Just $ raftName raft) == (clusterLeader $ raftConfiguration raft)
 
-setRaftLog :: (RaftLog l v) => l -> RaftContext l v -> RaftContext l v
+setRaftLog :: (RaftLog l c v) => l -> RaftContext l c v -> RaftContext l c v
 setRaftLog rlog raft = raft {
         raftLog = rlog
         }
 
-setRaftConfiguration :: (RaftLog l v) => Configuration -> RaftContext l v -> RaftContext l v
+setRaftConfiguration :: (RaftLog l c v) => Configuration -> RaftContext l c v -> RaftContext l c v
 setRaftConfiguration cfg raft =
     let newState = (raftState raft) {
         raftStateConfiguration = (raftStateConfiguration $ raftState raft) {
@@ -249,17 +257,17 @@ setRaftConfiguration cfg raft =
         }}
         in setRaftState newState raft
 
-raftConfiguration :: (RaftLog l v) => RaftContext l v -> Configuration 
+raftConfiguration :: (RaftLog l c v) => RaftContext l c v -> Configuration 
 raftConfiguration raft = clusterConfiguration $ raftStateConfiguration $ raftState raft
 
-setRaftConfigurationIndex :: (RaftLog l v) => Maybe Index -> RaftContext l v -> RaftContext l v
+setRaftConfigurationIndex :: (RaftLog l c v) => Maybe Index -> RaftContext l c v -> RaftContext l c v
 setRaftConfigurationIndex index raft =
     let newState = (raftState raft) {
         raftStateConfigurationIndex = index
         }
         in setRaftState newState raft
 
-setRaftState :: (RaftLog l v) => RaftState v -> RaftContext l v -> RaftContext l v
+setRaftState :: (RaftLog l c v) => RaftState v -> RaftContext l c v -> RaftContext l c v
 setRaftState state raft = raft {
         raftState = state
         }
