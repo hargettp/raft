@@ -26,7 +26,9 @@ module Control.Consensus.Raft (
     module Data.Log,
     module Control.Consensus.Raft.Actions,
     module Control.Consensus.Raft.Client,
+    module Control.Consensus.Raft.Log,
     module Control.Consensus.Raft.Types
+    
 ) where
 
 -- local imports
