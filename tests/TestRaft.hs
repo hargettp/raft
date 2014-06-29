@@ -20,7 +20,6 @@ module TestRaft (
 -- local imports
 
 import Control.Consensus.Raft
-import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Protocol

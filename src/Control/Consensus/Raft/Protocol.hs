@@ -46,9 +46,6 @@ module Control.Consensus.Raft.Protocol (
 import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
-import Control.Consensus.Raft.Types
-
-import Data.Log
 
 -- external imports
 

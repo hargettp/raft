@@ -17,6 +17,7 @@
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft.Actions (
+    Command,
     -- * Actions
     RaftAction(..),
     ConfigurationCommand(..),
@@ -29,8 +30,6 @@ module Control.Consensus.Raft.Actions (
 -- local imports
 
 import Control.Consensus.Raft.Types
-
-import Data.Log
 
 -- external imports
 
@@ -79,6 +78,12 @@ isCommandAction _ = False
 
 isConfigurationAction :: (Command c) => RaftAction c -> Bool
 isConfigurationAction = not . isCommandAction
+
+{-|
+Commands are the specific operations applied to 'Control.Consensus.Log.State's
+to transform them into a new 'Control.Consensus.Log.State'.
+-}
+class (Eq c,Show c,Serialize c) => Command c
 
 --------------------------------------------------------------------------------
 -- Configuration actions

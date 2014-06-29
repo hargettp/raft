@@ -28,8 +28,6 @@ import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Types
 
-import Data.Log
-
 -- external imports
 
 import Control.Concurrent

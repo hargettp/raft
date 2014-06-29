@@ -20,13 +20,10 @@ module TestLog (
 
 import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Log
-import Control.Consensus.Raft.Types
 
 import IntServer
 
 -- external imports
-
-import Data.Log
 
 import Prelude hiding (log)
 

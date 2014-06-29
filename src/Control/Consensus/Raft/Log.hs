@@ -39,7 +39,12 @@ module Control.Consensus.Raft.Log (
     raftSafeAppendedTerm,
     setRaftMembers,
     setRaftLog,
-    setRaftState
+    setRaftState,
+
+    module Control.Consensus.Raft.Actions,
+    module Control.Consensus.Raft.Types,
+    module Data.Log
+
 ) where
 
 -- local imports
