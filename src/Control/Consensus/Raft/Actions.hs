@@ -17,7 +17,6 @@
 -----------------------------------------------------------------------------
 
 module Control.Consensus.Raft.Actions (
-    Command,
     -- * Actions
     RaftAction(..),
     ConfigurationCommand(..),
@@ -49,13 +48,13 @@ data ConfigurationCommand = AddParticipants [Name]
 
 instance Serialize ConfigurationCommand
 
-data RaftAction c = (Command c) => Cfg ConfigurationCommand
+data RaftAction c = (Serialize c) => Cfg ConfigurationCommand
     | Cmd c
 
-deriving instance (Command c) => Eq (RaftAction c)
-deriving instance (Command c) => Show (RaftAction c)
+deriving instance (Eq c) => Eq (RaftAction c)
+deriving instance (Show c) => Show (RaftAction c)
 
-instance (Command c) => Serialize (RaftAction c) where
+instance (Serialize c) => Serialize (RaftAction c) where
     get = do
         kind <- getWord8
         case kind of
@@ -72,18 +71,12 @@ instance (Command c) => Serialize (RaftAction c) where
         putWord8 1
         put cmd
 
-isCommandAction :: (Command c) => RaftAction c -> Bool
+isCommandAction :: (Serialize c) => RaftAction c -> Bool
 isCommandAction (Cmd _) = True
 isCommandAction _ = False
 
-isConfigurationAction :: (Command c) => RaftAction c -> Bool
+isConfigurationAction :: (Serialize c) => RaftAction c -> Bool
 isConfigurationAction = not . isCommandAction
-
-{-|
-Commands are the specific operations applied to 'Control.Consensus.Log.State's
-to transform them into a new 'Control.Consensus.Log.State'.
--}
-class (Eq c,Show c,Serialize c) => Command c
 
 --------------------------------------------------------------------------------
 -- Configuration actions
@@ -93,7 +86,7 @@ class (Eq c,Show c,Serialize c) => Command c
 Apply the 'Action' to the 'Configuration', if it is a configuration change; otherwise,
 leave the configuration unchanged
 -}
-applyConfigurationAction :: (Command c) => Configuration -> RaftAction c -> Configuration
+applyConfigurationAction :: (Serialize c) => Configuration -> RaftAction c -> Configuration
 applyConfigurationAction cfg (Cfg cmd) = applyConfigurationCommand cfg cmd
 applyConfigurationAction cfg (Cmd _) = cfg
 

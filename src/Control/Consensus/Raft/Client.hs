@@ -32,6 +32,8 @@ import Control.Consensus.Raft.Types
 
 import Control.Concurrent
 
+import Data.Serialize
+
 import Network.Endpoints
 import Network.RPC
 
@@ -59,7 +61,7 @@ newClient endpoint name cfg = Client {
 {-|
 Perform an 'Action' in the cluster.
 -}
-performAction :: (Command c) => Client -> RaftAction c -> IO RaftTime
+performAction :: (Serialize c) => Client -> RaftAction c -> IO RaftTime
 performAction client action = do
     -- TODO consider whether there is an eventual timeout
     -- in case the cluster can't be reached
@@ -78,9 +80,9 @@ performAction client action = do
             infoM _log $ "Client " ++ (clientName client) ++ " searching again for members"
             perform cs cfg members members
         perform cs cfg members (leader:others) = do
-            infoM _log $ "Client " ++ (clientName client) ++ " sending action " ++ (show action) ++ " to " ++ leader
+            -- infoM _log $ "Client " ++ (clientName client) ++ " sending action " ++ (show action) ++ " to " ++ leader
             maybeResult <- goPerformAction cs cfg leader action
-            infoM _log $ "Client " ++ (clientName client) ++ " sent action " ++ (show action) ++ " to " ++ leader
+            -- infoM _log $ "Client " ++ (clientName client) ++ " sent action " ++ (show action) ++ " to " ++ leader
             infoM _log $ "Client " ++ (clientName client) ++ " received response " ++ (show maybeResult)
             case maybeResult of
                 Just result -> if (memberActionSuccess result)

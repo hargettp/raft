@@ -46,7 +46,7 @@ data IntCommand = Add Int
     | Subtract Int
     | Multiply Int
     | Divide Int
-    deriving (Generic,Eq,Show)
+    deriving (Eq,Show,Generic)
 
 instance Serialize IntCommand
 
@@ -62,7 +62,7 @@ applyIntCommand (IntState initial) (Divide value) = return $ IntState $ initial 
 
 data IntLogEntry = IntLogEntry {
     entryCommand :: IntCommand
-} deriving (Generic,Show)
+} deriving (Eq,Show,Generic)
 
 instance Serialize IntLogEntry
 
@@ -70,7 +70,7 @@ data IntLog = IntLog {
     numberLogLastCommitted :: RaftTime,
     numberLogLastAppended :: RaftTime,
     numberLogEntries :: [RaftLogEntry IntCommand]
-} deriving (Show)
+} deriving (Eq,Show)
 
 instance RaftLog IntLog IntCommand IntState where
     lastAppendedTime = numberLogLastAppended
@@ -83,8 +83,6 @@ mkIntLog = do
         numberLogLastAppended = RaftTime (-1) (-1),
         numberLogEntries = []
     }
-
-instance Command IntCommand
 
 instance State IntState IO IntCommand where
 

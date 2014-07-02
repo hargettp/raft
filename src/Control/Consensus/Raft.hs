@@ -28,7 +28,7 @@ module Control.Consensus.Raft (
     module Control.Consensus.Raft.Client,
     module Control.Consensus.Raft.Log,
     module Control.Consensus.Raft.Types
-    
+
 ) where
 
 -- local imports
@@ -70,7 +70,7 @@ _log = "raft.consensus"
 Run the core Raft consensus algorithm for the indicated server.  This function
 takes care of coordinating the transitions among followers, candidates, and leaders as necessary.
 -}
-withConsensus :: (RaftLog l c v) => Endpoint -> Name -> l -> RaftState v -> (Raft l c v -> IO ()) -> IO ()
+withConsensus :: (RaftLog l e v) => Endpoint -> Name -> l -> RaftState v -> (Raft l e v -> IO ()) -> IO ()
 withConsensus endpoint name initialLog initialState fn = do
     vRaft <- atomically $ mkRaft endpoint initialLog initialState
     withAsync (run vRaft)
@@ -93,7 +93,7 @@ withConsensus endpoint name initialLog initialState fn = do
                 else return ()
             participate vRaft
 
-follow :: (RaftLog l c v) => Raft l c v -> IO ()
+follow :: (RaftLog l e v) => Raft l e v -> IO ()
 follow vRaft = do
     initialRaft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft -> 
@@ -111,7 +111,7 @@ follow vRaft = do
     As a follower, wait for 'AppendEntries' requests and process them, 
     commit new changes as necessary, and stop when no heartbeat received.
 -}
-doFollow :: (RaftLog l c v) => Raft l c v -> IO ()
+doFollow :: (RaftLog l e v) => Raft l e v -> IO ()
 doFollow vRaft = do
     doSynchronize vRaft onRequest alwaysContinue
     where
@@ -132,14 +132,14 @@ doFollow vRaft = do
             return checkpointedRaft
         alwaysContinue _ = True
 
-doSynchronize :: (RaftLog l c v) => Raft l c v -> ((RaftContext l c v) -> AppendEntries c -> IO (RaftContext l c v)) -> (Name -> Bool) -> IO ()
+doSynchronize :: (RaftLog l e v) => Raft l e v -> ((RaftContext l e v) -> AppendEntries e -> IO (RaftContext l e v)) -> (Name -> Bool) -> IO ()
 doSynchronize vRaft reqfn contfn = do
     initialRaft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint initialRaft
         cfg = raftStateConfiguration $ raftState initialRaft
         name = raftName initialRaft
     maybeLeader <- onAppendEntries endpoint cfg name $ \req -> do
-        debugM _log $ printf "Server %v received %v" name (show req)
+        -- debugM _log $ printf "Server %v received %v" name (show req)
         infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
         (valid, raft) <- atomically $ do
             raft <-readTVar (raftContext vRaft)
@@ -165,7 +165,7 @@ doSynchronize vRaft reqfn contfn = do
                 else return ()
         Nothing -> return ()
 
-preCommitConfigurationChange :: (RaftLog l c v) => Raft l c v -> [RaftLogEntry c] -> STM ()
+preCommitConfigurationChange :: (RaftLog l e v) => Raft l e v -> [RaftLogEntry e] -> STM ()
 preCommitConfigurationChange _ [] = return ()
 preCommitConfigurationChange vRaft (entry:_) = do
     case entryAction entry of
@@ -182,7 +182,7 @@ preCommitConfigurationChange vRaft (entry:_) = do
 {-|
 Wait for request vote requests and process them
 -}
-doVote :: (RaftLog l c v) => Raft l c v -> IO ()
+doVote :: (RaftLog l e v) => Raft l e v -> IO ()
 doVote vRaft = do
     initialRaft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint initialRaft
@@ -224,7 +224,7 @@ doVote vRaft = do
 {-|
 Initiate an election, volunteering to lead the cluster if elected.
 -}
-volunteer :: (RaftLog l c v) => Raft l c v -> IO Bool
+volunteer :: (RaftLog l e v) => Raft l e v -> IO Bool
 volunteer vRaft = do
     participant <- atomically $ do
         raft <- readTVar $ raftContext vRaft
@@ -242,7 +242,7 @@ volunteer vRaft = do
                 Right won -> return won
         else return False
 
-doVolunteer :: (RaftLog l c v) => Raft l c v -> IO Bool
+doVolunteer :: (RaftLog l e v) => Raft l e v -> IO Bool
 doVolunteer vRaft = do
     raft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft ->
@@ -271,7 +271,7 @@ doVolunteer vRaft = do
         majority :: M.Map Name (Maybe MemberResult) -> Int -> Bool
         majority votes tally = tally > ((M.size $ votes) `quot` 2)
 
-lead :: (RaftLog l c v) => Raft l c v -> IO ()
+lead :: (RaftLog l e v) => Raft l e v -> IO ()
 lead vRaft = do
     raft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft -> do
@@ -297,7 +297,7 @@ lead vRaft = do
 type Actions c = Mailbox (Maybe (RaftAction c,Reply MemberResult))
 type Clients = Mailbox (Index,Reply MemberResult)
 
-doPulse :: (RaftLog l c v) => Raft l c v -> Actions c -> IO ()
+doPulse :: (RaftLog l e v) => Raft l e v -> Actions c -> IO ()
 doPulse vRaft actions = do
     raft <- atomically $ do
         raft <- readTVar (raftContext vRaft)
@@ -314,7 +314,7 @@ doPulse vRaft actions = do
     As a leader, wait for 'AppendEntries' requests and process them, 
     commit new changes as necessary, and stop when no heartbeat received.
 -}
-doRespond :: (RaftLog l c v) => Raft l c v -> IO ()
+doRespond :: (RaftLog l e v) => Raft l e v -> IO ()
 doRespond vRaft = do
     initialRaft <- atomically $ readTVar (raftContext vRaft)
     let name = raftName initialRaft
@@ -326,14 +326,14 @@ doRespond vRaft = do
 {-|
 Service requests from clients
 -}
-doServe :: (RaftLog l c v) => Raft l c v -> Actions c -> IO ()
+doServe :: (RaftLog l e v) => Raft l e v -> Actions e -> IO ()
 doServe vRaft actions = do
     raft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint raft
         leader = raftName raft
     infoM _log $ printf "Serving from %v in term %v "leader (show $ raftCurrentTerm raft)
     onPerformAction endpoint leader $ \action reply -> do
-        infoM _log $ printf "Leader %v received action %v" leader (show action)
+        -- infoM _log $ printf "Leader %v received action %v" leader (show action)
         atomically $ writeMailbox actions $ Just (action,reply)
     doServe vRaft actions
 
@@ -341,13 +341,13 @@ doServe vRaft actions = do
 Leaders commit entries to their log, once enough members have appended those entries.
 Once committed, the leader replies to the client who requested the action.
 -}
-doPerform :: (RaftLog l c v) => Raft l c v -> Actions c -> Clients -> IO ()
+doPerform :: (RaftLog l e v) => Raft l e v -> Actions e -> Clients -> IO ()
 doPerform vRaft actions clients = do
     append vRaft actions clients
     commit vRaft clients
     doPerform vRaft actions clients
 
-append :: (RaftLog l c v) => Raft l c v -> Actions c -> Clients -> IO ()
+append :: (RaftLog l e v) => Raft l e v -> Actions e -> Clients -> IO ()
 append vRaft actions clients = do
     (raft,maybeAction) <- atomically $ do
         maybeAction <- readMailbox actions
@@ -383,7 +383,7 @@ append vRaft actions clients = do
             infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
             return ()
 
-commit :: (RaftLog l c v) => Raft l c v -> Clients -> IO ()
+commit :: (RaftLog l e v) => Raft l e v -> Clients -> IO ()
 commit vRaft clients = do
     raft <- atomically $ readTVar (raftContext vRaft)
     let initialLog = raftLog raft
@@ -394,9 +394,9 @@ commit vRaft clients = do
         prevTime = lastCommittedTime initialLog
         cfg = raftStateConfiguration $ raftState raft
     (commitIndex,entries) <- gatherLatestEntries initialLog
-    infoM _log $ printf "Synchronizing from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
+    -- infoM _log $ printf "Synchronizing from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
-    infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
+    -- infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
     let members = raftMembers raft
         newMembers = updateMembers members results
         newAppendedIndex = membersSafeAppendedIndex newMembers $ clusterConfiguration cfg
@@ -447,7 +447,7 @@ or no configuration `Action1 at all in the list. By batching entries in this man
 easier to know when to pre-commit a configuration change, and what configuration should be in force
 when committing all subsequent entries in the list.
 -}
-gatherLatestEntries :: (RaftLog l c v) => l -> IO (Index,[RaftLogEntry c])
+gatherLatestEntries :: (RaftLog l e v) => l -> IO (Index,[RaftLogEntry e])
 gatherLatestEntries log = do
     (commitIndex,entries) <- fetchLatestEntries log
     case entries of
@@ -460,7 +460,7 @@ gatherLatestEntries log = do
         isCommandEntry = isCommandAction . entryAction
         commandEntries = takeWhile isCommandEntry
 
-notifyClients :: (RaftLog l c v) => Raft l c v -> Clients -> l -> RaftState v -> IO ()
+notifyClients :: (RaftLog l e v) => Raft l e v -> Clients -> l -> RaftState v -> IO ()
 notifyClients vRaft clients newLog newState = do
     maybeReply <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft ->
@@ -484,7 +484,7 @@ notifyClients vRaft clients newLog newState = do
             reply
             infoM _log $ printf "Replied at index %v" (show index)
 
-doRedirect :: (RaftLog l c v) => Raft l c v -> IO ()
+doRedirect :: (RaftLog l e v) => Raft l e v -> IO ()
 doRedirect vRaft = do
     raft <- atomically $ readTVar (raftContext vRaft)
     let term = raftCurrentTerm raft
@@ -496,7 +496,7 @@ doRedirect vRaft = do
         reply $ mkResult False newRaft
     doRedirect vRaft
 
-mkResult :: (RaftLog l c v) => Bool -> RaftContext l c v -> MemberResult
+mkResult :: (RaftLog l e v) => Bool -> RaftContext l e v -> MemberResult
 mkResult success raft = MemberResult {
     memberActionSuccess = success,
     memberLeader = clusterLeader $ clusterConfiguration $ raftStateConfiguration $ raftState raft,

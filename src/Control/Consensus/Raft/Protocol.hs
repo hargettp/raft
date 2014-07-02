@@ -65,7 +65,7 @@ import System.Log.Logger
 _log :: String
 _log = "raft.protocol"
 
-data AppendEntries c = (Command c) => AppendEntries {
+data AppendEntries c = (Serialize c) => AppendEntries {
     aeLeader :: Name,
     aeLeaderTerm :: Term,
     aePreviousTime :: RaftTime,
@@ -73,10 +73,7 @@ data AppendEntries c = (Command c) => AppendEntries {
     aeEntries :: [RaftLogEntry c]
 }
 
-deriving instance (Command c) => Eq (AppendEntries c)
-deriving instance (Command c) => Show (AppendEntries c)
-
-instance (Command c) => Serialize (AppendEntries c) where
+instance (Serialize c) => Serialize (AppendEntries c) where
     get = do
         leader <- get
         term <- get
@@ -102,12 +99,12 @@ instance Serialize RequestVote
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
-goAppendEntries :: (Command c) => CallSite
+goAppendEntries :: (Serialize e) => CallSite
             -> RaftConfiguration            -- ^^ Cluster configuration
             -> Term                     -- ^^ Leader's current term
             -> RaftTime                 -- ^^ `RaftTime` of entry just prior to the entries being appended
             -> RaftTime                 -- ^^ Last index up to which all entries are committed on leader
-            -> [RaftLogEntry c]    -- ^^ Entries to append
+            -> [RaftLogEntry e]    -- ^^ Entries to append
             -> IO (M.Map Name (Maybe MemberResult))
 goAppendEntries cs cfg term prevTime commitTime entries = do
     let Just leader = clusterLeader $ clusterConfiguration cfg
@@ -146,10 +143,10 @@ goRequestVote cs cfg term candidate lastEntryTime = do
 methodPerformAction :: String
 methodPerformAction = "performAction"
 
-goPerformAction :: (Command c) => CallSite
+goPerformAction :: (Serialize e) => CallSite
                     -> RaftConfiguration
                     -> Name
-                    -> RaftAction c
+                    -> RaftAction e
                     -> IO (Maybe MemberResult)
 goPerformAction cs cfg member action = do
     maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ clusterTimeouts cfg) $ encode action
@@ -163,7 +160,7 @@ goPerformAction cs cfg member action = do
 Wait for an 'AppendEntries' RPC to arrive, until 'rpcTimeout' expires. If one arrives,
 process it, and return @True@.  If none arrives before the timeout, then return @False@.
 -}
-onAppendEntries :: (Command c) => Endpoint -> RaftConfiguration -> Name -> (AppendEntries c-> IO MemberResult) -> IO (Maybe Name)
+onAppendEntries :: (Serialize e) => Endpoint -> RaftConfiguration -> Name -> (AppendEntries e-> IO MemberResult) -> IO (Maybe Name)
 onAppendEntries endpoint cfg server fn = do
     msg <- hearTimeout endpoint server methodAppendEntries (timeoutHeartbeat $ clusterTimeouts cfg)
     case msg of
@@ -188,7 +185,7 @@ onRequestVote endpoint server fn = do
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: (Command c) => Endpoint -> Name -> (RaftAction c -> Reply MemberResult -> IO ()) -> IO ()
+onPerformAction :: (Serialize e) => Endpoint -> Name -> (RaftAction e -> Reply MemberResult -> IO ()) -> IO ()
 onPerformAction endpoint member fn = do
     (bytes,reply) <- hear endpoint member methodPerformAction
     infoM _log $ "Heard performAction on " ++ member

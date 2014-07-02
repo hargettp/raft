@@ -52,7 +52,7 @@ testEmptyLog = do
     log <- mkIntLog
     let val = mkRaftState (IntState 0) (mkRaftConfiguration []) "server1"
     (_,chg) <- commitEntries log 0 val
-    assertEqual "Empty log should leave value unchanged" val chg
+    assertEqual "Empty log should leave value unchanged" (raftStateData val) (raftStateData chg)
 
 testSingleAction :: Assertion
 testSingleAction = do
