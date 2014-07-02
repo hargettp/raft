@@ -22,7 +22,7 @@ module IntServer (
     IntCommand(..),
     IntRaft,
     IntLogEntry(..),
-    IntLog(..),
+    IntLog,
     IntState(..),
     mkIntLog
 ) where
@@ -66,56 +66,15 @@ data IntLogEntry = IntLogEntry {
 
 instance Serialize IntLogEntry
 
-data IntLog = IntLog {
-    numberLogLastCommitted :: RaftTime,
-    numberLogLastAppended :: RaftTime,
-    numberLogEntries :: [RaftLogEntry IntCommand]
-} deriving (Eq,Show)
-
-instance RaftLog IntLog IntCommand IntState where
-    lastAppendedTime = numberLogLastAppended
-    lastCommittedTime = numberLogLastCommitted
+type IntLog = ListLog IntCommand IntState
 
 mkIntLog :: IO IntLog
-mkIntLog = do
-    return IntLog {
-        numberLogLastCommitted = RaftTime (-1) (-1),
-        numberLogLastAppended = RaftTime (-1) (-1),
-        numberLogEntries = []
-    }
+mkIntLog = mkListLog
 
 instance State IntState IO IntCommand where
 
     canApplyEntry _ _ = return True
 
-    applyEntry initial cmd = do
-        applyIntCommand initial cmd
-
-instance Log IntLog IO (RaftLogEntry IntCommand) (RaftState IntState) where
-
-    lastCommitted log = logIndex $ numberLogLastCommitted log
-
-    lastAppended log = logIndex $ numberLogLastAppended log
-
-    appendEntries log index newEntries = do
-        if null newEntries
-            then return log
-            else do
-                let term = maximum $ map entryTerm newEntries
-                return log {
-                    numberLogLastAppended = RaftTime term (index + (length newEntries) - 1),
-                    numberLogEntries = (take (index + 1) (numberLogEntries log)) ++ newEntries
-                }
-    fetchEntries log index count = do
-        let entries = numberLogEntries log
-        return $ take count $ drop index entries
-
-    commitEntry oldLog commitIndex entry = do
-        let newLog = oldLog {
-                numberLogLastCommitted = RaftTime (entryTerm entry) commitIndex
-                }
-        return newLog
-
-    checkpoint oldLog oldState = return (oldLog,oldState)
+    applyEntry = applyIntCommand
 
 type IntRaft = Raft IntLog IntCommand IntState

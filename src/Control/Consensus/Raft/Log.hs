@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE StandaloneDeriving #-}
 -----------------------------------------------------------------------------
@@ -41,6 +42,9 @@ module Control.Consensus.Raft.Log (
     setRaftLog,
     setRaftState,
 
+    ListLog(..),
+    mkListLog,
+
     module Control.Consensus.Raft.Actions,
     module Control.Consensus.Raft.Types,
     module Data.Log
@@ -62,6 +66,8 @@ import qualified Data.Map as M
 import Data.Serialize
 
 import Network.Endpoints
+
+import Prelude hiding (log)
 
 import System.Log.Logger
 
@@ -276,3 +282,52 @@ setRaftState :: (RaftLog l e v) => RaftState v -> RaftContext l e v -> RaftConte
 setRaftState state raft = raft {
         raftState = state
         }
+
+
+--------------------------------------------------------------------------------
+-- List log
+--------------------------------------------------------------------------------
+
+data ListLog e v = (Serialize e,Serialize v) => ListLog {
+    listLogLastCommitted :: RaftTime,
+    listLogLastAppended :: RaftTime,
+    listLogEntries :: [RaftLogEntry e]
+}
+
+deriving instance (Eq e) => Eq (ListLog e v)
+deriving instance (Show e) => Show (ListLog e v)
+
+instance (Serialize e,State v IO e) => Log (ListLog e v) IO (RaftLogEntry e) (RaftState v) where
+
+    lastCommitted log = logIndex $ listLogLastCommitted log
+
+    lastAppended log = logIndex $ listLogLastAppended log
+
+    appendEntries log index newEntries = do
+        if null newEntries
+            then return log
+            else do
+                let term = maximum $ map entryTerm newEntries
+                return log {
+                    listLogLastAppended = RaftTime term (index + (length newEntries) - 1),
+                    listLogEntries = (take (index + 1) (listLogEntries log)) ++ newEntries
+                }
+    fetchEntries log index count = do
+        let entries = listLogEntries log
+        return $ take count $ drop index entries
+
+    commitEntry oldLog commitIndex entry = do
+        let newLog = oldLog {
+                listLogLastCommitted = RaftTime (entryTerm entry) commitIndex
+                }
+        return newLog
+
+    checkpoint oldLog oldState = return (oldLog,oldState)
+
+instance (Serialize e,Serialize v,State v IO e) => RaftLog (ListLog e v) e v where
+    lastAppendedTime = listLogLastAppended
+    lastCommittedTime = listLogLastCommitted
+
+mkListLog :: (Serialize e,Serialize v) => IO (ListLog e v)
+mkListLog = let initial = RaftTime (-1) (-1)
+               in return $ ListLog initial initial []
