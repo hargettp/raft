@@ -97,7 +97,8 @@ follow :: (RaftLog l e v) => Raft l e v -> IO ()
 follow vRaft = do
     initialRaft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft -> 
-            setRaftMembers M.empty 
+            setRaftMembers M.empty
+                $ setRaftReady False
                 $ setRaftLeader Nothing oldRaft
         readTVar (raftContext vRaft)
     let name = raftName initialRaft
@@ -247,6 +248,7 @@ doVolunteer vRaft = do
     raft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft ->
             setRaftTerm ((raftCurrentTerm oldRaft) + 1)
+                $ setRaftReady False
                 $ setRaftLastCandidate Nothing oldRaft
         readTVar (raftContext vRaft)
     let candidate = raftName raft
@@ -279,6 +281,7 @@ lead vRaft = do
                 cfg = raftStateConfiguration $ raftState oldRaft
                 members = mkMembers cfg $ lastCommittedTime $ raftLog oldRaft
             setRaftTerm ((raftCurrentTerm oldRaft) + 1)
+                $ setRaftReady False
                 $ setRaftLeader (Just name)
                 $ setRaftLastCandidate Nothing 
                 $ setRaftMembers members oldRaft
@@ -334,7 +337,21 @@ doServe vRaft actions = do
     infoM _log $ printf "Serving from %v in term %v "leader (show $ raftCurrentTerm raft)
     onPerformAction endpoint leader $ \action reply -> do
         -- infoM _log $ printf "Leader %v received action %v" leader (show action)
-        atomically $ writeMailbox actions $ Just (action,reply)
+        maybeReply <- atomically $ do
+            newRaft <- readTVar (raftContext vRaft)
+            -- This is important, as it helps clients see a consistent
+            -- view of the cluster: we don't report ourselves as leader
+            -- until we are ready, and we're not ready until we have
+            -- received a response from a majority of members for
+            -- at least 1 `AppendEntries` RPC
+            if (raftStateReady $ raftState newRaft)
+                then do
+                    writeMailbox actions $ Just (action,reply)
+                    return Nothing
+                else return $ Just $ reply $ mkResult False newRaft
+        case maybeReply of
+            Nothing -> return ()
+            Just failure -> failure
     doServe vRaft actions
 
 {-|
@@ -410,7 +427,12 @@ commit vRaft clients = do
             infoM _log $ printf "Leader stepping down; new term %v discovered" (show newTerm)
             return ()
         else do
-            newRaft <- atomically $ readTVar $ raftContext vRaft
+            -- we report ourselves ready, because if we are here, then at least a majority
+            -- of members have joined our term and thus acknowledged us as leader. Only
+            -- once that has happened is it safe to serve clients
+            newRaft <- atomically $ do
+                modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftReady True oldRaft
+                readTVar $ raftContext vRaft
             (newLog,newState) <- let time = (RaftTime (raftCurrentTerm newRaft) newAppendedIndex)
                                      oldCommitedIndex = commitIndex
                                      count = newAppendedIndex - oldCommitedIndex
@@ -499,7 +521,11 @@ doRedirect vRaft = do
 mkResult :: (RaftLog l e v) => Bool -> RaftContext l e v -> MemberResult
 mkResult success raft = MemberResult {
     memberActionSuccess = success,
-    memberLeader = clusterLeader $ clusterConfiguration $ raftStateConfiguration $ raftState raft,
+    -- If we're the leader, we can't report ourselves as a leader
+    -- in results until we are actually ready
+    memberLeader = if (isRaftLeader raft) && (not $ isRaftReady raft)
+        then Nothing
+        else clusterLeader $ clusterConfiguration $ raftStateConfiguration $ raftState raft,
     memberCurrentTerm = raftCurrentTerm raft,
     memberLastAppended = lastAppendedTime $ raftLog raft,
     memberLastCommitted = lastCommittedTime $ raftLog raft
