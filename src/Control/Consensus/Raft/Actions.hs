@@ -12,7 +12,10 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- An action is an operation that can be applied to a 'Control.Consensus.Raft.Log.RaftState'
+-- to change the state to a new one. As implemented here, a 'RaftAction' contains either
+-- a 'ConfigurationCommand' that alters the configuration of the cluster or an ordinary
+-- application-specific command that changes the 'Data.Log.State' behind the state machine.
 --
 -----------------------------------------------------------------------------
 
@@ -41,6 +44,9 @@ import Network.Endpoints
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+{-|
+A command that changes the 'Configuration' of a cluster.
+-}
 data ConfigurationCommand = AddParticipants [Name]
     | RemoveParticipants [Name]
     | SetConfiguration Configuration
@@ -48,6 +54,9 @@ data ConfigurationCommand = AddParticipants [Name]
 
 instance Serialize ConfigurationCommand
 
+{-|
+An action that either changes the configuration or the state of a state machine.
+-}
 data RaftAction c = (Serialize c) => Cfg ConfigurationCommand
     | Cmd c
 
@@ -71,10 +80,16 @@ instance (Serialize c) => Serialize (RaftAction c) where
         putWord8 1
         put cmd
 
+{-|
+Return 'True' if the action is a command for changing state.
+-}
 isCommandAction :: (Serialize c) => RaftAction c -> Bool
 isCommandAction (Cmd _) = True
 isCommandAction _ = False
 
+{-|
+Return 'True' if the action is a command for changing configuration.
+-}
 isConfigurationAction :: (Serialize c) => RaftAction c -> Bool
 isConfigurationAction = not . isCommandAction
 

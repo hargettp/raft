@@ -12,11 +12,24 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- Generalized implementation of Raft consensus algorithm.
+-- Generalized implementation of the Raft consensus algorithm.
 --
--- Application writers generally need only supply implementation of
--- 'Control.Consensus.Log.Log' and 'Control.Consensus.Log.State', together with 
--- defining  'Command's.
+-- Application writers generally need only supply an implementation of
+-- 'Control.Consensus.Raft.Log.RaftLog' and 'Control.Consensus.Log.State'. For many
+-- applications, the provided 'Control.Consensus.Raft.Log.ListLog' may be sufficient for
+-- the 'Control.Consensus.Raft.Log.RaftLog' implementation.
+-- Applications also may choose to define how to externally persist the application's log and state.
+-- Note that use of strong persistence (e.g., to disk or stable storage) or weak persistence
+-- (e.g., retain in memory or volatile storage only) is up to the application, with the
+-- caveat that Raft can only recover certain failure scenarios when strong persistence
+-- is in use.
+--
+-- The function 'withConsensus' takes the supplied log and state (and an 'Endpoint')
+-- and performs the Raft algorithm to ensure consistency with other members of the cluster
+-- (all of which must also be executing 'withConsensus' and reachable through their 'Endpoint's).
+-- Server applications should execute 'withConsensus', client applications can use the
+-- "Control.Consensus.Raft.Client" module to interface with the cluster over a network
+-- (or other transport).
 --
 -----------------------------------------------------------------------------
 

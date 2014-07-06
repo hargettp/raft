@@ -13,7 +13,8 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- Defines the low-level protocol describing the RPC messages that
+-- pass members of a cluster governed by Raft.
 --
 -----------------------------------------------------------------------------
 
@@ -65,11 +66,21 @@ import System.Log.Logger
 _log :: String
 _log = "raft.protocol"
 
+{-|
+A message type in the formal Raft algorithm, this message is used both
+for sending a heartbeat from the leader to cluster members, but also
+for replicating logged state to members as operations occur over time.
+-}
 data AppendEntries c = (Serialize c) => AppendEntries {
+    -- | The leader who sent this message
     aeLeader :: Name,
+    -- | The current term of the leader
     aeLeaderTerm :: Term,
+    -- | The 'RaftTime' for the entry just prior to the entries sent in this message
     aePreviousTime :: RaftTime,
+    -- | The latest 'RaftTime' for committed entries
     aeCommittedTime :: RaftTime,
+    -- | The entries being appended in this request (if any)
     aeEntries :: [RaftLogEntry c]
 }
 
@@ -88,9 +99,16 @@ instance (Serialize c) => Serialize (AppendEntries c) where
         put $ aeCommittedTime ae
         put $ aeEntries ae
 
+{-|
+A message type in the formal Raft algorithm, this message is used to solicit
+votes for a member wishing to take over the leadership role.
+-}
 data RequestVote = RequestVote {
+        -- | The candidate's 'Name'
         rvCandidate :: Name,
+        -- | The current term for the candidate
         rvCandidateTerm :: Term,
+        -- | The latest 'RaftTime' for the last entry in the candidate's log
         rvCandidateLastEntryTime :: RaftTime
 } deriving (Eq,Show,Generic)
 
@@ -99,6 +117,9 @@ instance Serialize RequestVote
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
+{-|
+Initiates an 'AppendEntries' RPC request to members of a cluster.
+-}
 goAppendEntries :: (Serialize e) => CallSite
             -> RaftConfiguration            -- ^^ Cluster configuration
             -> Term                     -- ^^ Leader's current term
@@ -122,6 +143,9 @@ goAppendEntries cs cfg term prevTime commitTime entries = do
 methodRequestVote :: String
 methodRequestVote = "requestVote"
 
+{-|
+Initiates a 'RequestVote' RPC to members of a cluster.
+-}
 goRequestVote :: CallSite
                 -> RaftConfiguration -- ^^ Cluster configuration
                 -> Term     -- ^^ Candidate's term
@@ -143,6 +167,11 @@ goRequestVote cs cfg term candidate lastEntryTime = do
 methodPerformAction :: String
 methodPerformAction = "performAction"
 
+{-|
+Invoked by clients to request that a cluster perform an action. Not formally
+part of the Raft algorithm, this extension enables client applications to
+interact with a cluster managed via Raft.
+-}
 goPerformAction :: (Serialize e) => CallSite
                     -> RaftConfiguration
                     -> Name

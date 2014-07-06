@@ -10,7 +10,8 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- Contains utility definitions for maintaining awareness of the state of the members
+-- in a clsuter; used only be the active leader of a cluster.
 --
 -----------------------------------------------------------------------------
 
@@ -56,21 +57,34 @@ import Network.Endpoints
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+{-|
+Describes the state of a member as far as helps with execution of the Raft algorithm.
+-}
 data Member = Member {
+    -- | the member's name
     memberName :: Name,
+    -- | the member's current term
     memberTerm :: Term,
+    -- | the 'RaftTime' of the last entry appended to the member's 'Control.Consensus.Raft.Log.RaftLog'.
     memberLogLastAppended :: RaftTime,
+    -- | the 'RaftTime' of the last entry committed in the member's 'Control.Consensus.Raft.Log.RaftLog'.
     memberLogLastCommitted :: RaftTime
 } deriving (Eq,Show)
 
+{-|
+Create a new 'Member' for tracking the state of a cluster member.
+-}
 mkMember :: RaftTime -> Name -> Member
 mkMember time name = Member {
     memberName = name,
     memberTerm = logTerm time,
     memberLogLastAppended = time,
-    memberLogLastCommitted = time
+    memberLogLastCommitted = time 
     }
 
+{-|
+Update records of a member's state, based on the result of an RPC.
+-}
 updateMember :: Member -> MemberResult -> Member
 updateMember member result = member {
     memberTerm = memberCurrentTerm result,
@@ -78,29 +92,55 @@ updateMember member result = member {
     memberLogLastCommitted = memberLastCommitted result
     }
 
+{-|
+A collection of 'Member's.
+-}
 type Members = M.Map Name Member
 
+{-|
+Create a new 'Members' collection.
+-}
 mkMembers :: RaftConfiguration -> RaftTime -> Members
 mkMembers cfg time = M.fromList $ map (\name -> (name,mkMember time name)) (clusterMembers $ clusterConfiguration cfg)
 
+{-|
+Adjust a 'Members' collection, based on a new configuration. If a 'Name' is no longer listed
+as a member in the 'Configuration', then the corresponding 'Member' will no longer be
+present in the 'Members' collection. If a new 'Name' is in the configuration but not present
+in the 'Members' collection, then a new 'Member' will be created to track its state.
+-}
 reconfigureMembers :: Members -> Configuration -> RaftTime -> Members
 reconfigureMembers members cfg time = 
     M.fromList $ map (\name -> case M.lookup name members of
             Nothing -> (name,mkMember time name)
             Just member -> (name,member)) (clusterMembers cfg)
 
+{-|
+The result of invoking an RPC on a member.
+-}
 data MemberResult = MemberResult {
+    -- | 'True' if the RPC was a success, 'False' otherwise.
     memberActionSuccess :: Bool,
+    -- | The leader, if any, that the member is currently following.
     memberLeader :: Maybe Name,
+    -- | The member's current 'Term'.
     memberCurrentTerm :: Term,
+    -- | the 'RaftTime' of the last entry appended to the member's 'Control.Consensus.Raft.Log.RaftLog'.
     memberLastAppended :: RaftTime,
+    -- | the 'RaftTime' of the last entry committed in the member's 'Control.Consensus.Raft.Log.RaftLog'.
     memberLastCommitted :: RaftTime
 } deriving (Eq,Show,Generic)
 
 instance Serialize MemberResult
 
+{-|
+A collection of 'MemberResult's, keyed by member 'Name'.
+-}
 type MemberResults =  M.Map Name (Maybe MemberResult)
 
+{-|
+Returns true if the majority of the results were successful.
+-}
 majorityConsent :: MemberResults -> Bool
 majorityConsent results = count >= majority
     where
@@ -109,6 +149,9 @@ majorityConsent results = count >= majority
         successful Nothing = False
         successful (Just result) = memberActionSuccess result
 
+{-|
+Update the state of 'Members' based on collected 'MemberResults'.
+-}
 updateMembers :: Members -> MemberResults -> Members
 updateMembers members results = M.map applyUpdates members
     where
@@ -118,6 +161,9 @@ updateMembers members results = M.map applyUpdates members
                 Just Nothing -> member
                 Just (Just result) -> updateMember member result
 
+{-|
+Return the highest 'Term' that has been appended to a majority of 'Member's.
+-}
 membersSafeAppendedTerm :: Members -> Configuration -> Term
 membersSafeAppendedTerm members cfg@(Configuration _ _ _) =
     if M.null members
@@ -128,6 +174,9 @@ membersSafeAppendedTerm members cfg@(Configuration _ _ _) =
 membersSafeAppendedTerm members (JointConfiguration jointOld jointNew) =
     min (membersSafeAppendedTerm members jointOld) (membersSafeAppendedTerm members jointNew)
 
+{-|
+Return the highest 'Term's that have been appended to all 'Member's.
+-}
 membersAppendedTerm :: Members -> Configuration -> [Term]
 membersAppendedTerm members cfg = 
     map (logTerm . memberLogLastAppended) sortedParticipants
@@ -157,6 +206,10 @@ membersSafeAppendedIndex members cfg@(Configuration _ _ _) =
 membersSafeAppendedIndex members (JointConfiguration jointOld jointNew) =
     min (membersSafeAppendedIndex members jointOld) (membersSafeAppendedIndex members jointNew)
 
+{-|
+Return the highest 'Index'es that have been appended to the 'Data.Log.Log'
+of all 'Member's.
+-}
 membersAppendedIndex :: Members -> Configuration -> [Index]
 membersAppendedIndex members cfg = 
     map (logIndex . memberLogLastAppended) sortedParticipants
@@ -182,6 +235,10 @@ membersSafeCommittedIndex members =
     where
         majority = (M.size members) `quot` 2
 
+{-|
+Return the highest 'Index'es that have been committed in the 'Data.Log.Log'
+of all 'Member's.
+-}
 membersCommittedIndex :: Members -> [Index]
 membersCommittedIndex members = 
     map (logIndex . memberLogLastCommitted) sortedMembers
@@ -193,5 +250,8 @@ membersCommittedIndex members =
             -- inverting the ordering so that we sort from high to low
             in compare rightIndex leftIndex
 
+{-|
+Return the highest 'Term' seen by all 'Members'.
+-}
 membersHighestTerm :: Members -> Term
 membersHighestTerm members = maximum $ map memberTerm $ M.elems members

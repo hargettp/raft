@@ -14,7 +14,12 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- This module defines the base extensions to the fundamental 'Data.Log.Log' and 'Data.Log.State'
+-- types in order to support the Raft algorithm.  For example, in ordinary 'Data.Log.Log's,
+-- there are no constraints on the entries that change the 'Data.Log.State' of the underlying
+-- state machine. For Raft, however, such entries must be capable of declaring the 'Term'
+-- in which the entry was created.  Thus, a 'RaftLog' uses a 'RaftLogEntry' as the type for
+-- its entries.
 --
 -----------------------------------------------------------------------------
 
@@ -36,7 +41,6 @@ module Control.Consensus.Raft.Log (
     isRaftReady,
     setRaftLastCandidate,
     setRaftConfiguration,
-    setRaftConfigurationIndex,
     raftConfiguration,
     raftMembers,
     raftSafeAppendedTerm,
@@ -92,8 +96,15 @@ data RaftContext l e v = (RaftLog l e v) => RaftContext {
     raftState :: RaftState v
 }
 
+{-|
+Encapsulates the complete state necessary for participating in the Raft algorithm,
+in a mutable form by storing it in a 'TVar'.
+-}
 data Raft l e v = (RaftLog l e v,Serialize v) => Raft {raftContext :: TVar (RaftContext l e v)}
 
+{-|
+Create a new 'Raft' instance.
+-}
 mkRaft :: (RaftLog l e v) => Endpoint -> l -> RaftState v -> STM (Raft l e v)
 mkRaft endpoint initialLog initialState = do
     ctx <- newTVar $ RaftContext {
@@ -104,13 +115,15 @@ mkRaft endpoint initialLog initialState = do
     return $ Raft ctx
 
 {-|
-A minimal 'Log' sufficient for a 'Server' to particpate in the Raft algorithm'.
+A minimal 'Log' sufficient for a member to particpate in the Raft algorithm'.
 -}
 class (Serialize e,Serialize v,Log l IO (RaftLogEntry e) (RaftState v)) => RaftLog l e v where
     lastAppendedTime :: l -> RaftTime
     lastCommittedTime :: l -> RaftTime
 
-
+{-|
+The 'State' that 'RaftLog's expect for participating in the Raft algorithm.
+-}
 data RaftState v = (Serialize v) => RaftState {
     raftStateCurrentTerm :: Term,
     raftStateLastCandidate :: Maybe Name,
@@ -125,6 +138,9 @@ data RaftState v = (Serialize v) => RaftState {
 deriving instance (Eq v) => Eq (RaftState v)
 deriving instance (Show v) => Show (RaftState v)
 
+{-|
+Create a fresh 'RaftState' instance.
+-}
 mkRaftState :: (Serialize v) => v -> RaftConfiguration -> Name -> RaftState v
 mkRaftState initialData cfg name = RaftState {
     raftStateCurrentTerm = 0,
@@ -137,6 +153,9 @@ mkRaftState initialData cfg name = RaftState {
     raftStateData = initialData
 }
 
+{-|
+The type of entry that a 'RaftLog' manages.
+-}
 data RaftLogEntry e = (Serialize e) => RaftLogEntry {
     entryTerm :: Term,
     entryAction :: RaftAction e
@@ -189,9 +208,15 @@ instance (Serialize e,State v IO e) => State (RaftState v) IO (RaftLogEntry e) w
                     }
                 }
 
+{-|
+The current 'Term' for this instance.
+-}
 raftCurrentTerm :: (RaftLog l e v) => RaftContext l e v -> Term
 raftCurrentTerm raft = raftStateCurrentTerm $ raftState raft
 
+{-|
+The 'Name' this instance uses for communicating in the network.
+-}
 raftName :: (RaftLog l e v) => RaftContext l e v -> Name
 raftName raft = raftStateName $ raftState raft
 
@@ -215,9 +240,16 @@ setRaftMembers members raft = raft {
             }
         }
 
+{-|
+The current state of 'Members' in the cluster; only leaders track 'Member' state,
+so in followers the valueof 'Members' is less useful.
+-}
 raftMembers :: (RaftLog l e v) => RaftContext l e v -> Members
 raftMembers raft = raftStateMembers $ raftState raft
 
+{-|
+Computes 'membersSafeAppendedTerm' on this instance's 'Members'.
+-}
 raftSafeAppendedTerm :: (RaftLog l e v) => RaftContext l e v -> Term
 raftSafeAppendedTerm raft = 
     let members = raftMembers raft
@@ -233,7 +265,9 @@ setRaftReady ready raft = raft {
                         raftStateReady = ready
                         }
                     }
-
+{-|
+Returns 'True' if this instance is ready to serve clients.
+-}
 isRaftReady :: RaftContext l e v -> Bool
 isRaftReady raft = raftStateReady $ raftState raft
 
@@ -268,15 +302,23 @@ setRaftLeader leader raft =
                             configurationLeader = leader
                         }}}
                 }
-
+{-|
+Returns 'True' if this instance is operating as the leader.
+-}
 isRaftLeader :: (RaftLog l e v) => RaftContext l e v -> Bool
 isRaftLeader raft = (Just $ raftName raft) == (clusterLeader $ raftConfiguration raft)
 
+{-|
+Update the 'RaftLog' in this instance.
+-}
 setRaftLog :: (RaftLog l e v) => l -> RaftContext l e v -> RaftContext l e v
 setRaftLog rlog raft = raft {
         raftLog = rlog
         }
 
+{-|
+Change the 'Configuration' in this instance.
+-}
 setRaftConfiguration :: (RaftLog l e v) => Configuration -> RaftContext l e v -> RaftContext l e v
 setRaftConfiguration cfg raft =
     let newState = (raftState raft) {
@@ -285,16 +327,15 @@ setRaftConfiguration cfg raft =
         }}
         in setRaftState newState raft
 
+{-|
+Return the 'Configuration' for this instance.
+-}
 raftConfiguration :: (RaftLog l e v) => RaftContext l e v -> Configuration 
 raftConfiguration raft = clusterConfiguration $ raftStateConfiguration $ raftState raft
 
-setRaftConfigurationIndex :: (RaftLog l e v) => Maybe Index -> RaftContext l e v -> RaftContext l e v
-setRaftConfigurationIndex index raft =
-    let newState = (raftState raft) {
-        raftStateConfigurationIndex = index
-        }
-        in setRaftState newState raft
-
+{-|
+Update the 'RaftState' for this instance.
+-}
 setRaftState :: (RaftLog l e v) => RaftState v -> RaftContext l e v -> RaftContext l e v
 setRaftState state raft = raft {
         raftState = state
@@ -305,6 +346,14 @@ setRaftState state raft = raft {
 -- List log
 --------------------------------------------------------------------------------
 
+{-|
+A simple implementation of a 'Log' and 'RaftLog' useful in many scenarios.  Since
+typically there should not be that many uncommitted entries (e.g., appended
+but not committed) in a log, then the size of this list should be small, relative
+to the number of operations performed through it. As a 'ListLog' implements 'Serialize',
+applications may choose to persist the log in its entirety to stable storage
+as needed.
+-}
 data ListLog e v = (Serialize e,Serialize v) => ListLog {
     listLogLastCommitted :: RaftTime,
     listLogLastAppended :: RaftTime,
@@ -345,6 +394,9 @@ instance (Serialize e,Serialize v,State v IO e) => RaftLog (ListLog e v) e v whe
     lastAppendedTime = listLogLastAppended
     lastCommittedTime = listLogLastCommitted
 
+{-|
+Create a new 'ListLog'.
+-}
 mkListLog :: (Serialize e,Serialize v) => IO (ListLog e v)
 mkListLog = let initial = RaftTime (-1) (-1)
                in return $ ListLog initial initial []

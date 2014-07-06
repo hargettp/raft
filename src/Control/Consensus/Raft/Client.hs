@@ -8,7 +8,8 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- A 'Client' is the primary external interface to a cluster of servers
+-- coordinating their state via the Raft algorithm.
 --
 -----------------------------------------------------------------------------
 
@@ -45,12 +46,19 @@ import System.Log.Logger
 _log :: String
 _log = "raft.client"
 
+{-|
+A client of a Raft cluster.
+-}
 data Client = Client {
     clientEndpoint :: Endpoint,
     clientName :: Name,
     clientConfiguration :: RaftConfiguration
 }
 
+{-|
+Create a new client with the provided 'Name' to which members
+can respond to the client's requests.
+-}
 newClient :: Endpoint -> Name -> RaftConfiguration -> Client
 newClient endpoint name cfg = Client {
     clientConfiguration = cfg,
@@ -59,7 +67,7 @@ newClient endpoint name cfg = Client {
 }
 
 {-|
-Perform an 'Action' in the cluster.
+Perform an action on the cluster.
 -}
 performAction :: (Serialize c) => Client -> RaftAction c -> IO RaftTime
 performAction client action = do

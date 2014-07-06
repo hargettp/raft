@@ -7,18 +7,28 @@ synopsis:            Haskell implementation of the Raft consensus algorithm
 description:         See <https://ramcloud.stanford.edu/wiki/download/attachments/11370504/raft.pdf In Search of an Understandable Consensus Algorithm> 
                      by Diego Ongaro and John Ousterhout for more detailed information on the algorithm.
                      .
+                     The design of this implementation is based on the notion that in many distributed algorithms
+                     (and with protocols in general), there are often many different roles or states that each 
+                     node must manage concurrently. While implementing all of this role and state management in
+                     a single "message loop" (e.g., a routine that waits for a new message, dispatches each 
+                     message using a logical or actual case expression, and then waits again) is possible, 
+                     maintaining the correct behavior for each role or state can be difficult. The implementation
+                     here separates each distinct role into a discrete message loop, sharing algorithm state in
+                      a 'Control.Concurrent.STM.TVar.TVar'.
+                     .
                      Generally, importing "Control.Consensus.Raft" should be sufficient for application
                      writers wishing to leverage the algorithm.
+                     
 
-homepage:            https://github.com/hargettp/raft
-license:             MIT
-license-file:        LICENSE
+homepage:           https://github.com/hargettp/raft
+license:              MIT
+license-file:          LICENSE
 author:              Phil Hargett
 maintainer:          phil@haphazardhouse.net
 -- copyright:
 category:            Control
-build-type:          Simple
-extra-source-files:  README.md,
+build-type:           Simple
+extra-source-files:   README.md,
                      changes.md
 
 cabal-version:       >=1.10

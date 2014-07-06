@@ -10,7 +10,7 @@
 -- Stability   :  experimental
 -- Portability :  non-portable (requires STM)
 --
--- (..... module description .....)
+-- Common types used in this implementation of the Raft algorithm.
 --
 -----------------------------------------------------------------------------
 
@@ -54,19 +54,35 @@ import qualified System.Random as R
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+{-|
+A term is a phase in the execution of the Raft algorithm defined by a period
+in which there is at most one leader. Members change terms when beginning a
+new election, and after successfully winnning an election.
+-}
 type Term = Int
 
 {-|
-`RaftTime` captures a measure of how up to date a log is.
+`RaftTime` captures a measure of how up to date a log is: it is
+a combination of a 'Term' and 'Index'.
 -}
 data RaftTime = RaftTime Term Index deriving (Show,Eq,Ord,Generic)
 
+{-|
+Starting point for 'RaftTime': the time that is lowest than all other
+valid 'RaftTime's.
+-}
 initialRaftTime :: RaftTime
 initialRaftTime = RaftTime (-1) (-1)
 
+{-|
+Extracts the 'Index' from a 'RaftTime'.
+-}
 logIndex :: RaftTime -> Index
 logIndex (RaftTime _ index) = index
 
+{-|
+Extracts the 'Term' from a 'RaftTime'.
+-}
 logTerm :: RaftTime -> Term
 logTerm (RaftTime term _) = term
 
@@ -77,7 +93,7 @@ instance Serialize RaftTime
 --------------------------------------------------------------------------------
 
 {-|
-Type used for timeouts.  Mostly used for code clarity.
+Type used for timeouts, measured in microseconds.  Mostly used for code clarity.
 -}
 type Timeout = Int
 
@@ -87,11 +103,11 @@ Different environments may have different performance characteristics,
 and thus require different timeout values to operate correctly.
 -}
 data Timeouts = Timeouts {
-    timeoutRpc :: Timeout,
-    timeoutClientRpc :: Timeout,
-    timeoutHeartbeat :: Timeout,
-    timeoutPulse :: Timeout,
-    timeoutElectionRange :: (Timeout,Timeout)
+    timeoutRpc :: Timeout, -- ^ maximum time to wait before deciding an RPC call has failed
+    timeoutClientRpc :: Timeout, -- ^ maximum time clients waits before decinding an RPC call to a member has failed
+    timeoutHeartbeat :: Timeout, -- ^ expected time between heartbeats that prove the leader is still active
+    timeoutPulse :: Timeout, -- ^ maximum length between pulses from the leader proving the leader is still active (must be less than heartbeat)
+    timeoutElectionRange :: (Timeout,Timeout) -- ^ the range of times from which an election timeout will be selected
 } deriving (Eq,Show,Generic)
 
 instance Serialize Timeouts
@@ -104,7 +120,7 @@ defaultTimeouts :: Timeouts
 defaultTimeouts = timeouts $ 150 * 1000
 
 {-|
-Returns timeouts scaled from the provided RPC timeout.
+Returns default timeouts scaled from the provided RPC timeout.
 
 -}
 timeouts :: Timeout -> Timeouts
@@ -129,8 +145,8 @@ electionTimeout outs = R.randomRIO $ timeoutElectionRange outs
 --------------------------------------------------------------------------------
 
 {- |
-A configuration identifies all the members of a cluster and the nature of their participation 
-in the cluster.
+A 'RaftConfigurations' incorproates both an ordinary 'Configuration' but also a set
+of 'Timeouts' for tuning the cluster's timing characteristics in the Raft algorithm.
 -}
 data RaftConfiguration = RaftConfiguration {
     clusterConfiguration :: Configuration,
@@ -139,6 +155,10 @@ data RaftConfiguration = RaftConfiguration {
 
 instance Serialize RaftConfiguration
 
+{-|
+Given a list of names, return a new 'RaftConfiguration' using 'defaultTimeouts' for
+Raft algorithm execution.
+-}
 mkRaftConfiguration :: [Name] -> RaftConfiguration
 mkRaftConfiguration participants = RaftConfiguration {
     clusterConfiguration = mkConfiguration participants,

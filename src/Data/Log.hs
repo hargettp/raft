@@ -13,7 +13,10 @@
 -- Stability   :  experimental
 -- Portability :  portable
 --
--- General 'Log' and 'State' typeclasses.
+-- General 'Log' and 'State' typeclasses. Collectively, these implement a state machine, and the
+-- Raft algorithm essential is one application of the
+-- <https://www.cs.cornell.edu/fbs/publications/SMSurvey.pdf replicated state machine model>
+-- for implementing a distributed system.
 --
 -----------------------------------------------------------------------------
 
