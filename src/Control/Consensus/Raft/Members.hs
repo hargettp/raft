@@ -33,7 +33,8 @@ module Control.Consensus.Raft.Members (
 
     MemberResult(..),
 
-    MemberResults
+    MemberResults,
+    majorityConsent
 ) where
 
 -- local imports
@@ -99,6 +100,14 @@ data MemberResult = MemberResult {
 instance Serialize MemberResult
 
 type MemberResults =  M.Map Name (Maybe MemberResult)
+
+majorityConsent :: MemberResults -> Bool
+majorityConsent results = count >= majority
+    where
+        count = length $ filter successful $ M.elems results
+        majority = ((M.size results) `quot` 2) + 1
+        successful Nothing = False
+        successful (Just result) = memberActionSuccess result
 
 updateMembers :: Members -> MemberResults -> Members
 updateMembers members results = M.map applyUpdates members

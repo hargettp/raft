@@ -431,7 +431,11 @@ commit vRaft clients = do
             -- of members have joined our term and thus acknowledged us as leader. Only
             -- once that has happened is it safe to serve clients
             newRaft <- atomically $ do
-                modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftReady True oldRaft
+                -- stronger guarantee than just in our term: members must have agreed
+                -- to the action, also implying they agreed with our leadership
+                if (not $ isRaftReady raft) && majorityConsent results
+                    then modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftReady True oldRaft
+                    else return ()
                 readTVar $ raftContext vRaft
             (newLog,newState) <- let time = (RaftTime (raftCurrentTerm newRaft) newAppendedIndex)
                                      oldCommitedIndex = commitIndex
