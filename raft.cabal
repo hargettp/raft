@@ -2,7 +2,7 @@
 -- see http://haskell.org/cabal/users-guide/
 
 name:               raft
-version:             0.1.0.0
+version:             0.1.0.1
 synopsis:            Haskell implementation of the Raft consensus algorithm
 description:         See <https://ramcloud.stanford.edu/wiki/download/attachments/11370504/raft.pdf In Search of an Understandable Consensus Algorithm> 
                      by Diego Ongaro and John Ousterhout for more detailed information on the algorithm.
