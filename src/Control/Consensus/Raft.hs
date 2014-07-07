@@ -111,7 +111,6 @@ follow vRaft = do
     initialRaft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft -> 
             setRaftMembers M.empty
-                $ setRaftReady False
                 $ setRaftLeader Nothing oldRaft
         readTVar (raftContext vRaft)
     let name = raftName initialRaft
@@ -261,7 +260,6 @@ doVolunteer vRaft = do
     raft <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft ->
             setRaftTerm ((raftCurrentTerm oldRaft) + 1)
-                $ setRaftReady False
                 $ setRaftLastCandidate Nothing oldRaft
         readTVar (raftContext vRaft)
     let candidate = raftName raft
@@ -293,8 +291,7 @@ lead vRaft = do
             let name = raftName oldRaft
                 cfg = raftStateConfiguration $ raftState oldRaft
                 members = mkMembers cfg $ lastCommittedTime $ raftLog oldRaft
-            setRaftReady False
-                $ setRaftLeader (Just name)
+            setRaftLeader (Just name)
                 $ setRaftLastCandidate Nothing 
                 $ setRaftMembers members oldRaft
         readTVar (raftContext vRaft)
@@ -349,21 +346,7 @@ doServe vRaft actions = do
     infoM _log $ printf "Serving from %v in term %v "leader (show $ raftCurrentTerm raft)
     onPerformAction endpoint leader $ \action reply -> do
         -- infoM _log $ printf "Leader %v received action %v" leader (show action)
-        maybeReply <- atomically $ do
-            newRaft <- readTVar (raftContext vRaft)
-            -- This is important, as it helps clients see a consistent
-            -- view of the cluster: we don't report ourselves as leader
-            -- until we are ready, and we're not ready until we have
-            -- received a response from a majority of members for
-            -- at least 1 `AppendEntries` RPC
-            if (raftStateReady $ raftState newRaft)
-                then do
-                    writeMailbox actions $ Just (action,reply)
-                    return Nothing
-                else return $ Just $ reply $ mkResult False newRaft
-        case maybeReply of
-            Nothing -> return ()
-            Just failure -> failure
+        atomically $ writeMailbox actions $ Just (action,reply)
     doServe vRaft actions
 
 {-|
@@ -442,13 +425,7 @@ commit vRaft clients = do
             -- we report ourselves ready, because if we are here, then at least a majority
             -- of members have joined our term and thus acknowledged us as leader. Only
             -- once that has happened is it safe to serve clients
-            newRaft <- atomically $ do
-                -- stronger guarantee than just in our term: members must have agreed
-                -- to the action, also implying they agreed with our leadership
-                if (not $ isRaftReady raft) && majorityConsent results
-                    then modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftReady True oldRaft
-                    else return ()
-                readTVar $ raftContext vRaft
+            newRaft <- atomically $ readTVar $ raftContext vRaft
             (newLog,newState) <- let time = (RaftTime (raftCurrentTerm newRaft) newAppendedIndex)
                                      oldCommitedIndex = commitIndex
                                      count = newAppendedIndex - oldCommitedIndex
@@ -539,9 +516,7 @@ mkResult success raft = MemberResult {
     memberActionSuccess = success,
     -- If we're the leader, we can't report ourselves as a leader
     -- in results until we are actually ready
-    memberLeader = if (isRaftLeader raft) && (not $ isRaftReady raft)
-        then Nothing
-        else clusterLeader $ clusterConfiguration $ raftStateConfiguration $ raftState raft,
+    memberLeader = clusterLeader $ clusterConfiguration $ raftStateConfiguration $ raftState raft,
     memberCurrentTerm = raftCurrentTerm raft,
     memberLastAppended = lastAppendedTime $ raftLog raft,
     memberLastCommitted = lastCommittedTime $ raftLog raft

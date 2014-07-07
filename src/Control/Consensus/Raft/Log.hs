@@ -37,8 +37,6 @@ module Control.Consensus.Raft.Log (
     setRaftTerm,
     setRaftLeader,
     isRaftLeader,
-    setRaftReady,
-    isRaftReady,
     setRaftLastCandidate,
     setRaftConfiguration,
     raftConfiguration,
@@ -127,7 +125,6 @@ The 'State' that 'RaftLog's expect for participating in the Raft algorithm.
 data RaftState v = (Serialize v) => RaftState {
     raftStateCurrentTerm :: Term,
     raftStateLastCandidate :: Maybe Name,
-    raftStateReady :: Bool,
     raftStateName :: Name,
     raftStateConfigurationIndex :: Maybe Index,
     raftStateConfiguration :: RaftConfiguration,
@@ -145,7 +142,6 @@ mkRaftState :: (Serialize v) => v -> RaftConfiguration -> Name -> RaftState v
 mkRaftState initialData cfg name = RaftState {
     raftStateCurrentTerm = 0,
     raftStateLastCandidate = Nothing,
-    raftStateReady = False,
     raftStateName = name,
     raftStateConfigurationIndex = Nothing,
     raftStateConfiguration = cfg,
@@ -255,21 +251,6 @@ raftSafeAppendedTerm raft =
     let members = raftMembers raft
         cfg = raftConfiguration raft
         in membersSafeAppendedTerm members cfg
-
-{-|
-Update the readiness to handle client requests
--}
-setRaftReady :: Bool -> RaftContext l e v -> RaftContext l e v
-setRaftReady ready raft = raft {
-                    raftState = (raftState raft) {
-                        raftStateReady = ready
-                        }
-                    }
-{-|
-Returns 'True' if this instance is ready to serve clients.
--}
-isRaftReady :: RaftContext l e v -> Bool
-isRaftReady raft = raftStateReady $ raftState raft
 
 {-|
 Update the last candidate in a new 'RaftContext'
