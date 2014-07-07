@@ -82,25 +82,25 @@ tests = let servers7 = ["server1","server2","server3","server4","server5","serve
                     ("client1","localhost:30000")]
             memTests = (testsFor1 "mem" newMemoryTransport mem1Cfg)
                 ++ (testsFor3 "mem" newMemoryTransport mem3Cfg)
-                ++ (testsFor5 "mem" (newTCPTransport resolver) mem5Cfg)
-                ++ (testsFor7 "mem" (newTCPTransport resolver) mem7Cfg)
+                ++ (testsFor5 "mem" newMemoryTransport mem5Cfg)
+                ++ (testsFor7 "mem" newMemoryTransport mem7Cfg)
             udpTests = (testsFor1 "udp" (newUDPTransport resolver) socket1Cfg)
                ++ (testsFor3 "udp" (newUDPTransport resolver) socket3Cfg)
                ++ (testsFor5 "udp" (newUDPTransport resolver) socket5Cfg)
                ++ (testsFor7 "udp" (newUDPTransport resolver) socket7Cfg)
-            limitedUdpTests = [testCase (nameTest "udp" "3cluster") $ test3Cluster (newUDPTransport resolver) socket3Cfg]
+            -- limitedUdpTests = [testCase (nameTest "udp" "3cluster") $ test3Cluster (newUDPTransport resolver) socket3Cfg]
             tcpTests = (testsFor1 "tcp" (newTCPTransport resolver) socket1Cfg) ++
                (testsFor3 "tcp" (newTCPTransport resolver) socket3Cfg) ++
                (testsFor5 "tcp" (newTCPTransport resolver) socket5Cfg) ++
                (testsFor7 "tcp" (newTCPTransport resolver) socket7Cfg)
-            limitedTcpTests = [testCase (nameTest "tcp" "3cluster") $ test3Cluster (newTCPTransport resolver) socket3Cfg]
+            -- limitedTcpTests = [testCase (nameTest "tcp" "3cluster") $ test3Cluster (newTCPTransport resolver) socket3Cfg]
             in do
                 raftTransport <- lookupEnv "RAFT_TRANSPORT"
                 case raftTransport of
                     Just "mem" -> return memTests
                     Just "udp" -> return udpTests
                     Just "tcp" -> return tcpTests
-                    _ -> return $ memTests ++ limitedUdpTests ++ limitedTcpTests
+                    _ -> return $ memTests -- ++ limitedUdpTests ++ limitedTcpTests
 
 testsFor1 :: String -> (IO Transport) -> RaftConfiguration -> [Test.Framework.Test]
 testsFor1 base transportF cfg =  [

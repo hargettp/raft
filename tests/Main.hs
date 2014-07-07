@@ -12,6 +12,7 @@ import Control.Applicative
 import Control.Concurrent
 
 import System.Directory
+import System.Environment
 import System.Info
 import System.IO
 import System.Log.Formatter
@@ -29,7 +30,11 @@ main = do
   initLogging
   printPlatform
   testsToRun <- tests
-  defaultMain testsToRun
+  raftTransport <- lookupEnv "RAFT_TRANSPORT"
+  -- if we're just running the memory transport, let's go for a speedup
+  if (raftTransport == Just "mem") || (raftTransport == Nothing)
+    then defaultMainWithArgs testsToRun ["-j8"]
+    else defaultMain testsToRun
 
 initLogging :: IO ()
 initLogging = do
