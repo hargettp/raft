@@ -293,8 +293,7 @@ lead vRaft = do
             let name = raftName oldRaft
                 cfg = raftStateConfiguration $ raftState oldRaft
                 members = mkMembers cfg $ lastCommittedTime $ raftLog oldRaft
-            setRaftTerm ((raftCurrentTerm oldRaft) + 1)
-                $ setRaftReady False
+            setRaftReady False
                 $ setRaftLeader (Just name)
                 $ setRaftLastCandidate Nothing 
                 $ setRaftMembers members oldRaft
