@@ -154,18 +154,21 @@ doSynchronize vRaft reqfn contfn = do
     maybeLeader <- onAppendEntries endpoint cfg name $ \req -> do
         -- debugM _log $ printf "Server %v received %v" name (show req)
         infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
-        (valid, raft) <- atomically $ do
+        raft <- atomically $ do
             raft <-readTVar (raftContext vRaft)
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
-                then return (False,raft)
+                then return raft
                 else do
                     modifyTVar (raftContext vRaft) $ \oldRaft ->
                             setRaftTerm (aeLeaderTerm req)
                                 $ setRaftLeader (Just $ aeLeader req)
                                 $ setRaftLastCandidate Nothing oldRaft
-                    let log = raftLog raft
-                    -- check previous entry for consistency
-                    return ( (lastAppendedTime log) == (aePreviousTime req),raft)
+                    readTVar (raftContext vRaft)
+        prevEntry <- fetchEntries (raftLog raft) (logIndex $ aePreviousTime req) 1
+        -- check previous entry for consistency
+        let valid = (logTerm $ aePreviousTime req) == case prevEntry of
+                [] -> -1
+                (prev:_) -> entryTerm prev
         synchronizedRaft <- if valid
                 then reqfn raft req
                 else return raft
