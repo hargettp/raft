@@ -157,9 +157,8 @@ updateMembers members results = M.map applyUpdates members
     where
         applyUpdates member =
             case M.lookup (memberName member) results of
-                Nothing -> member
-                Just Nothing -> member
                 Just (Just result) -> updateMember member result
+                _ -> member
 
 {-|
 Return the highest 'Term' that has been appended to a majority of 'Member's.

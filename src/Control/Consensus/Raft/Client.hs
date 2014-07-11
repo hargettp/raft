@@ -97,7 +97,13 @@ performAction client action = do
                     then return $ memberLastCommitted result
                     else case memberLeader result of
                         -- follow the redirect to the correct leader
-                        Just newLeader -> perform cs cfg members (newLeader:others)
+                        Just newLeader -> do
+                            -- if the new leader is the same as the old leader, but we still failed,
+                            -- then pause before trying again
+                            if newLeader == leader
+                                then threadDelay $ 100 * 100
+                                else return ()
+                            perform cs cfg members (newLeader:others)
                         -- keep trying the others until a leader is found
                         Nothing -> perform cs cfg members others
                 Nothing ->  perform cs cfg members others

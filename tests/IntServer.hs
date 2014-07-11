@@ -42,6 +42,9 @@ import GHC.Generics
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
+_log :: String
+_log = "test.intraft"
+
 data IntCommand = Add Int
     | Subtract Int
     | Multiply Int

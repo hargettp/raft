@@ -66,7 +66,7 @@ import Control.Consensus.Raft.Types
 
 import Control.Concurrent.STM
 
-import qualified Data.Map as M
+-- import qualified Data.Map as M
 import Data.Serialize
 
 import Network.Endpoints
@@ -176,7 +176,7 @@ instance (Serialize e,State v IO e) => State (RaftState v) IO (RaftLogEntry e) w
             term = membersSafeAppendedTerm members $ clusterConfiguration cfg
             currentTerm = raftStateCurrentTerm oldRaftState
             leader = (Just $ raftStateName oldRaftState) == (clusterLeader $ clusterConfiguration cfg)
-        infoM _log $ printf "%v: Safe term for members %v is %v" currentTerm (show $ M.map (logTerm . memberLogLastAppended) members) term
+        infoM _log $ printf "%v: Safe term %v for members %v" currentTerm term (show members)
         if leader
                 then if term /= raftStateCurrentTerm oldRaftState
                     then return False
@@ -197,8 +197,10 @@ instance (Serialize e,State v IO e) => State (RaftState v) IO (RaftLogEntry e) w
                 return $ oldRaftState {raftStateData = newData}
             applyAction action = do
                 let cfg = applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldRaftState) action
+                    members = raftStateMembers oldRaftState
                 infoM _log $ printf "New configuration is %v" (show cfg)
                 return $ oldRaftState {
+                    raftStateMembers = reconfigureMembers members cfg initialRaftTime,
                     raftStateConfiguration = (raftStateConfiguration oldRaftState) {
                         clusterConfiguration = cfg
                     }
@@ -351,14 +353,14 @@ instance (Serialize e,State v IO e) => Log (ListLog e v) IO (RaftLogEntry e) (Ra
     lastAppended log = logIndex $ listLogLastAppended log
 
     appendEntries log index newEntries = do
-        if null newEntries
+        if null newEntries || (lastCommitted log) >= index
             then return log
             else do
                 let term = maximum $ map entryTerm newEntries
                 return log {
                     listLogLastAppended = RaftTime term (index + (length newEntries) - 1),
-                    listLogEntries = (take (index + 1) (listLogEntries log)) ++ newEntries
-                }
+                    listLogEntries = (take index (listLogEntries log)) ++ newEntries
+                    }
     fetchEntries log index count = do
         let entries = listLogEntries log
         return $ take count $ drop index entries

@@ -121,7 +121,7 @@ follow vRaft = do
                 doRedirect vRaft]
 
 {-|
-    As a follower, wait for 'AppendEntries' requests and process them, 
+    As a follower, wait for 'AppendEntries' requests and process them,
     commit new changes as necessary, and stop when no heartbeat received.
 -}
 doFollow :: (RaftLog l e v) => Raft l e v -> IO ()
@@ -130,17 +130,20 @@ doFollow vRaft = do
     where
         onRequest raft req = do
             let log = raftLog raft
-                index = (1 + (logIndex $ aePreviousTime req))
-            newLog <- appendEntries log index (aeEntries req)
+                nextIndex = (1 + (logIndex $ aePreviousTime req))
+            newLog <- appendEntries log nextIndex (aeEntries req)
             updatedRaft <- atomically $ do
                     preCommitConfigurationChange vRaft (aeEntries req)
                     modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
                     readTVar (raftContext vRaft)
-            (committedLog,committedState) <- commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
+            (committedLog,committedState) <- if (logIndex $ aeCommittedTime req) > (lastCommitted $ raftLog updatedRaft)
+                then commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
+                else return (raftLog updatedRaft,raftState updatedRaft)
             (checkpointedLog,checkpointedState) <- checkpoint committedLog committedState
             checkpointedRaft <- atomically $ do
                 modifyTVar (raftContext vRaft) $ \oldRaft ->
-                        setRaftLog checkpointedLog $ setRaftState checkpointedState oldRaft
+                        setRaftLog checkpointedLog
+                        $ setRaftState checkpointedState oldRaft
                 readTVar (raftContext vRaft)
             return checkpointedRaft
         alwaysContinue _ = True
@@ -152,8 +155,6 @@ doSynchronize vRaft reqfn contfn = do
         cfg = raftStateConfiguration $ raftState initialRaft
         name = raftName initialRaft
     maybeLeader <- onAppendEntries endpoint cfg name $ \req -> do
-        -- debugM _log $ printf "Server %v received %v" name (show req)
-        infoM _log $ printf "Server %v received pulse from %v" name (show $ aeLeader req)
         raft <- atomically $ do
             raft <-readTVar (raftContext vRaft)
             if (aeLeaderTerm req) < (raftCurrentTerm raft)
@@ -164,11 +165,15 @@ doSynchronize vRaft reqfn contfn = do
                                 $ setRaftLeader (Just $ aeLeader req)
                                 $ setRaftLastCandidate Nothing oldRaft
                     readTVar (raftContext vRaft)
-        prevEntry <- fetchEntries (raftLog raft) (logIndex $ aePreviousTime req) 1
         -- check previous entry for consistency
-        let valid = (logTerm $ aePreviousTime req) == case prevEntry of
-                [] -> -1
-                (prev:_) -> entryTerm prev
+        let requestPreviousTerm = (logTerm $ aePreviousTime req)
+            prevIndex = (logIndex $ aePreviousTime req)
+        localPreviousTerm <- if prevIndex < 0
+            then return (-1)
+            else do
+                prevEntries <- fetchEntries (raftLog raft) prevIndex 1
+                return $ entryTerm $ head prevEntries
+        let valid = requestPreviousTerm == localPreviousTerm
         synchronizedRaft <- if valid
                 then reqfn raft req
                 else return raft
@@ -302,7 +307,7 @@ lead vRaft = do
         term = raftCurrentTerm raft
     clients <- atomically $ newMailbox
     actions <- atomically $ newMailbox
-    infoM _log $ printf "Server %v leading in term %v" name (show term)
+    infoM _log $ printf "Server %v leading in term %v with members %s" name (show term) (show $ raftMembers raft)
     raceAll_ $ [doPulse vRaft actions,
                 doVote vRaft,
                 doRespond vRaft,
@@ -346,9 +351,7 @@ doServe vRaft actions = do
     raft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint raft
         leader = raftName raft
-    infoM _log $ printf "Serving from %v in term %v "leader (show $ raftCurrentTerm raft)
     onPerformAction endpoint leader $ \action reply -> do
-        -- infoM _log $ printf "Leader %v received action %v" leader (show action)
         atomically $ writeMailbox actions $ Just (action,reply)
     doServe vRaft actions
 
@@ -394,8 +397,8 @@ append vRaft actions clients = do
             atomically $ do
                 modifyTVar (raftContext vRaft) $ \oldRaft ->
                     setRaftLog revisedLog $ setRaftState revisedState oldRaft
-                writeMailbox clients (lastAppended newLog,reply)
-            infoM _log $ printf "Appended action at index %v" (show $ lastAppended newLog)
+                writeMailbox clients (lastAppended revisedLog,reply)
+            infoM _log $ printf "%v: Appended 1 action at index %v" (raftName raft) nextIndex
             return ()
 
 commit :: (RaftLog l e v) => Raft l e v -> Clients -> IO ()
@@ -406,38 +409,25 @@ commit vRaft clients = do
         endpoint = raftEndpoint raft
         cs = newCallSite endpoint leader
         term = raftCurrentTerm raft
-        prevTime = lastCommittedTime initialLog
         cfg = raftStateConfiguration $ raftState raft
-    (commitIndex,entries) <- gatherLatestEntries initialLog
-    -- infoM _log $ printf "Synchronizing from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
-    results <- goAppendEntries cs cfg term prevTime (RaftTime term commitIndex) entries
-    -- infoM _log $ printf "Synchronized from %v in term %v: %v" leader (show $ raftCurrentTerm raft) (show entries)
+    (prevTime,entries) <- gatherUnsynchronizedEntries (raftMembers raft) (clusterConfiguration cfg) initialLog
+    results <- goAppendEntries cs cfg term prevTime (lastCommittedTime initialLog) entries
     let members = raftMembers raft
         newMembers = updateMembers members results
-        newAppendedIndex = membersSafeAppendedIndex newMembers $ clusterConfiguration cfg
+        newCommittedIndex = membersSafeAppendedIndex newMembers $ clusterConfiguration cfg
         newTerm = membersHighestTerm newMembers
     atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
         setRaftMembers newMembers oldRaft
-    infoM _log $ printf "Safe appended index is %v" (show newAppendedIndex)
     if newTerm > (raftCurrentTerm raft)
         then do
             atomically $ modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftTerm newTerm oldRaft
             infoM _log $ printf "Leader stepping down; new term %v discovered" (show newTerm)
             return ()
         else do
-            -- we report ourselves ready, because if we are here, then at least a majority
-            -- of members have joined our term and thus acknowledged us as leader. Only
-            -- once that has happened is it safe to serve clients
             newRaft <- atomically $ readTVar $ raftContext vRaft
-            (newLog,newState) <- let time = (RaftTime (raftCurrentTerm newRaft) newAppendedIndex)
-                                     oldCommitedIndex = commitIndex
-                                     count = newAppendedIndex - oldCommitedIndex
-                                     in if count > 0
-                                        then do
-                                            infoM _log $ printf "Committing at time %v" (show time)
-                                            (log,state) <- commitEntries initialLog newAppendedIndex (raftState newRaft)
-                                            checkpoint log state
-                                        else return (initialLog,(raftState newRaft))
+            (newLog,newState) <- do
+                                    (log,state) <- commitEntries initialLog newCommittedIndex (raftState newRaft)
+                                    checkpoint log state
             (revisedLog,revisedState) <- case raftStateConfigurationIndex newState of
                 Nothing -> return (newLog,newState)
                 Just cfgIndex ->
@@ -458,22 +448,27 @@ commit vRaft clients = do
             notifyClients vRaft clients revisedLog revisedState
     return ()
 
-
-{-|
-Return a list of entries, with either a configuration `Action` at the beginning of the list,
-or no configuration `Action1 at all in the list. By batching entries in this manner, it becomes
-easier to know when to pre-commit a configuration change, and what configuration should be in force
-when committing all subsequent entries in the list.
--}
-gatherLatestEntries :: (RaftLog l e v) => l -> IO (Index,[RaftLogEntry e])
-gatherLatestEntries log = do
-    (commitIndex,entries) <- fetchLatestEntries log
-    case entries of
-        [] -> return (commitIndex,entries)
-        (first:rest) -> if isConfigurationEntry first
-                then return (commitIndex,(first:commandEntries rest))
-                else return (commitIndex,commandEntries (first:rest))
-        where
+gatherUnsynchronizedEntries :: (RaftLog l e v) => Members -> Configuration -> l -> IO (RaftTime,[RaftLogEntry e])
+gatherUnsynchronizedEntries members cfg log = do
+    let startIndex = maximum [0,minimum $ membersAppendedIndex members cfg ]
+        prevIndex = maximum [(-1),(startIndex - 1)]
+    if prevIndex < 0
+        then do
+            let count = (lastAppended log - startIndex) + 1
+            entries <- fetchEntries log startIndex count
+            return (initialRaftTime,groupEntries entries)
+        else do
+            let count = (lastAppended log - prevIndex) + 1
+            (prev:rest) <- fetchEntries log prevIndex count
+            return (RaftTime (entryTerm prev) prevIndex,groupEntries rest)
+    where
+        -- we return a list of entries that either has 1 configuration
+        -- entry at the beginning (e.g., 'Cfg') and no others, or has no
+        -- 'Cfg' entry at all.
+        groupEntries [] = []
+        groupEntries (first:rest) = if isConfigurationEntry first
+            then (first:commandEntries rest)
+            else (commandEntries (first:rest))
         isConfigurationEntry = isConfigurationAction . entryAction
         isCommandEntry = isCommandAction . entryAction
         commandEntries = takeWhile isCommandEntry
@@ -495,20 +490,14 @@ notifyClients vRaft clients newLog newState = do
                     else return Nothing
     case maybeReply of
         Nothing -> do
-            infoM _log $ printf "No client at index %v" (show $ lastCommitted newLog)
             return ()
-        Just (index,reply) -> do
-            infoM _log $ printf "Replying at index %v" (show index)
-            reply
-            infoM _log $ printf "Replied at index %v" (show index)
+        Just (_,reply) -> reply
 
 doRedirect :: (RaftLog l e v) => Raft l e v -> IO ()
 doRedirect vRaft = do
     raft <- atomically $ readTVar (raftContext vRaft)
-    let term = raftCurrentTerm raft
-        endpoint = raftEndpoint raft
+    let endpoint = raftEndpoint raft
         member = raftName raft
-    infoM _log $ printf "Redirecting from %v in %v" member (show term)
     onPassAction endpoint member $ \reply -> do
         newRaft <- atomically $ readTVar (raftContext vRaft)
         reply $ mkResult False newRaft

@@ -257,7 +257,6 @@ testConsistency transportF cfg = do
                                 _ <- waitForLeader vRafts
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ Add 1
                                 assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
-                                -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 5 * 1000 * 1000
                                 states <- allStates vRafts
                                 assertBool "All states should be equal" $ all (== (IntState 1)) states
@@ -280,10 +279,7 @@ test2Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Add 3
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ Multiply 5
                                 assertBool  (printf "Client index should be 1: %v" (show clientIndex)) $ clientIndex == 1
-                                -- pause -- have to wait for synchronization to occur
-                                threadDelay $ 2 * 1000 * 1000
-                                states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 15)) states
+                                threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
@@ -304,10 +300,7 @@ test3Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Multiply 5
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ Subtract 2
                                 assertBool  (printf "Client index should be 2: %v" (show clientIndex)) $ clientIndex == 2
-                                -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
-                                states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 13)) states
                                 checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
@@ -335,10 +328,7 @@ test10Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Subtract 2
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
-                                -- pause -- have to wait for synchronization to occur
-                                threadDelay $ 2 * 1000 * 1000
-                                states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 406)) states
+                                threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
@@ -366,10 +356,7 @@ test5Cluster10Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Subtract 2
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
-                                -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 5 * 1000 * 1000
-                                states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 406)) states
                                 checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
@@ -397,10 +384,7 @@ test7Cluster10Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Subtract 2
                                 RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
-                                -- pause -- have to wait for synchronization to occur
                                 threadDelay $ 2 * 1000 * 1000
-                                states <- allStates vRafts
-                                assertBool "" $ all (== (IntState 406)) states
                                 checkForConsistency_ vRafts)
         case errOrResult of
             Right _ -> assertBool "" True
@@ -528,6 +512,12 @@ checkForConsistency_ rafts = checkForConsistency 1 Nothing rafts
 
 checkForConsistency :: Integer -> Maybe Name -> [Raft IntLog IntCommand IntState] -> IO (Maybe Name)
 checkForConsistency run possibleLeader vRafts = do
+    actualLeader <- checkForMajority run possibleLeader vRafts
+    checkForEquality (5 * 1000 * 1000) vRafts
+    return actualLeader
+
+checkForMajority :: Integer -> Maybe Name -> [Raft IntLog IntCommand IntState] -> IO (Maybe Name)
+checkForMajority run possibleLeader vRafts = do
     rafts <- mapM (\vRaft -> atomically $ readTVar $ raftContext vRaft) vRafts
     let leaders = map (clusterLeader . clusterConfiguration . raftStateConfiguration . raftState) rafts
         results = map (raftStateData . raftState) rafts
@@ -535,7 +525,6 @@ checkForConsistency run possibleLeader vRafts = do
     assertBool (printf "%d: Most results should be equal" run) $ hasCommon results
     assertBool (printf "%d: Most log indexes should be equal" run) $ hasCommon indexes
     assertBool (printf "%d: Most members should have same leader: %s" run (show leaders)) $ hasCommon leaders
-    -- assertBool (printf "%d: There must be a leader %s" run (show leaders)) $ all (/= Nothing) leaders
     let leader = (leaders !! 0)
     case possibleLeader of
         Just _ -> if all (== possibleLeader) leaders
@@ -544,6 +533,35 @@ checkForConsistency run possibleLeader vRafts = do
         Nothing -> if all (== leader) leaders
                         then return leader
                         else return Nothing
+
+checkForEquality :: (RaftLog l e v,Eq v,Show v,Eq l,Show l) => Int -> [Raft l e v] -> IO ()
+checkForEquality delay vRafts = do
+    waitForEquality (printf "All members should have same leader")
+        $ \allRafts -> let leaders = map (clusterLeader . clusterConfiguration . raftStateConfiguration . raftState) allRafts
+                        in return $ all (== leaders !! 0) leaders
+    waitForEquality (printf "All log appended indexes should be equal to leader's")
+        $ \allRafts -> let appended = map (lastAppended . raftLog) allRafts
+                        in return $ all (== appended !! 0) appended
+    waitForEquality (printf "All log committed indexes should be equal to leader's")
+        $ \allRafts -> let committed = map (lastCommitted . raftLog) allRafts
+                           in return $ all (== committed !! 0) committed
+    waitForEquality (printf "All logs should be equal to leader's")
+        $ \allRafts -> let logs = map raftLog allRafts
+                        in return $ all (== logs !! 0) logs
+    waitForEquality (printf "All results should be equal to leader's")
+        $ \allRafts -> let results = map (raftStateData . raftState) allRafts
+                        in return $ all (== results !! 0) results
+    return ()
+    where
+        waitForEquality msg fn = do 
+            outcome <- race (threadDelay delay)
+                        (atomically $ do
+                            rafts <- mapM (\vRaft -> readTVar $ raftContext vRaft) vRafts
+                            outcome <- fn rafts
+                            if outcome
+                                then return ()
+                                else retry)
+            assertBool msg $ outcome == Right ()
 
 waitForLeader :: [Raft l e v] -> IO (Maybe Name)
 waitForLeader vRafts = do
@@ -556,6 +574,13 @@ waitForLeader vRafts = do
                 return leader
             else
                 retry
+
+{-
+timeBound :: Int -> IO () -> IO ()
+timeBound delay action = do
+    outcome <- race (threadDelay delay) action
+    assertBool "Test should not block" $ outcome == Right ()
+-}
 
 allLeaders :: [Raft IntLog IntCommand IntState] -> IO [Maybe Name]
 allLeaders vRafts = do
