@@ -40,6 +40,8 @@ import Network.RPC
 
 import System.Log.Logger
 
+import Text.Printf
+
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 
@@ -82,16 +84,16 @@ performAction client action = do
     perform cs cfg members members
     where
         perform cs cfg members [] = do
-            infoM _log $ "Client " ++ (clientName client) ++ " can't find any members"
+            infoM _log $ printf "Client %v can't find any members" (clientName client)
             -- timeout in case there are issues
             threadDelay $ 100 * 1000
-            infoM _log $ "Client " ++ (clientName client) ++ " searching again for members"
+            infoM _log $ printf "Client %v searching again for members" (clientName client)
             perform cs cfg members members
         perform cs cfg members (leader:others) = do
             -- infoM _log $ "Client " ++ (clientName client) ++ " sending action " ++ (show action) ++ " to " ++ leader
             maybeResult <- goPerformAction cs cfg leader action
             -- infoM _log $ "Client " ++ (clientName client) ++ " sent action " ++ (show action) ++ " to " ++ leader
-            infoM _log $ "Client " ++ (clientName client) ++ " received response " ++ (show maybeResult)
+            infoM _log $ printf "Client %v received response %s from %s" (clientName client) (show maybeResult) leader
             case maybeResult of
                 Just result -> if (memberActionSuccess result)
                     then return $ memberLastCommitted result

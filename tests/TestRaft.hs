@@ -474,7 +474,7 @@ testClientPerformAction transportF cfg = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
     let raftClient = newClient endpoint client cfg
-    let action = Cmd $ Add 1
+        action = Cmd $ Add 1
     finally (do
                 result <- performAction raftClient action
                 assertBool "Result should be true" $ result == RaftTime 1 1)

@@ -137,7 +137,9 @@ doFollow vRaft = do
                     modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
                     readTVar (raftContext vRaft)
             (committedLog,committedState) <- if (logIndex $ aeCommittedTime req) > (lastCommitted $ raftLog updatedRaft)
-                then commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
+                then do
+                    infoM _log $ printf "%v: Committing at %d" (raftName raft) (logIndex $ aeCommittedTime req)
+                    commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
                 else return (raftLog updatedRaft,raftState updatedRaft)
             (checkpointedLog,checkpointedState) <- checkpoint committedLog committedState
             checkpointedRaft <- atomically $ do
@@ -425,9 +427,12 @@ commit vRaft clients = do
             return ()
         else do
             newRaft <- atomically $ readTVar $ raftContext vRaft
-            (newLog,newState) <- do
-                                    (log,state) <- commitEntries initialLog newCommittedIndex (raftState newRaft)
-                                    checkpoint log state
+            (newLog,newState) <- if (newCommittedIndex > lastCommitted initialLog) 
+                then do
+                    infoM _log $ printf "%v: Committing at %d" leader newCommittedIndex
+                    (log,state) <- commitEntries initialLog newCommittedIndex (raftState newRaft)
+                    checkpoint log state
+                else return (initialLog,raftState newRaft)
             (revisedLog,revisedState) <- case raftStateConfigurationIndex newState of
                 Nothing -> return (newLog,newState)
                 Just cfgIndex ->
@@ -486,12 +491,12 @@ notifyClients vRaft clients newLog newState = do
                     then do
                         updatedRaft <- readTVar (raftContext vRaft)
                         _ <- readMailbox clients
-                        return $ Just (index, reply $ mkResult True updatedRaft)
+                        return $ Just $ reply $ mkResult True updatedRaft
                     else return Nothing
     case maybeReply of
         Nothing -> do
             return ()
-        Just (_,reply) -> reply
+        Just reply -> reply
 
 doRedirect :: (RaftLog l e v) => Raft l e v -> IO ()
 doRedirect vRaft = do
@@ -506,8 +511,6 @@ doRedirect vRaft = do
 mkResult :: (RaftLog l e v) => Bool -> RaftContext l e v -> MemberResult
 mkResult success raft = MemberResult {
     memberActionSuccess = success,
-    -- If we're the leader, we can't report ourselves as a leader
-    -- in results until we are actually ready
     memberLeader = clusterLeader $ clusterConfiguration $ raftStateConfiguration $ raftState raft,
     memberCurrentTerm = raftCurrentTerm raft,
     memberLastAppended = lastAppendedTime $ raftLog raft,
