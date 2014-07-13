@@ -131,23 +131,31 @@ doFollow vRaft = do
         onRequest raft req = do
             let log = raftLog raft
                 nextIndex = (1 + (logIndex $ aePreviousTime req))
+                count = length $ aeEntries req
+            if count > 0
+                then infoM _log $ printf "%v: Appending %d at %d" (raftName raft) count nextIndex
+                else return ()
             newLog <- appendEntries log nextIndex (aeEntries req)
+            if count > 0
+                then infoM _log $ printf "%v: Appended %d at %d" (raftName raft) count (lastAppended newLog)
+                else return ()
             updatedRaft <- atomically $ do
                     preCommitConfigurationChange vRaft (aeEntries req)
                     modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
                     readTVar (raftContext vRaft)
-            (committedLog,committedState) <- if (logIndex $ aeCommittedTime req) > (lastCommitted $ raftLog updatedRaft)
+            if (logIndex $ aeCommittedTime req) > (lastCommitted $ raftLog updatedRaft)
                 then do
                     infoM _log $ printf "%v: Committing at %d" (raftName raft) (logIndex $ aeCommittedTime req)
-                    commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
-                else return (raftLog updatedRaft,raftState updatedRaft)
-            (checkpointedLog,checkpointedState) <- checkpoint committedLog committedState
-            checkpointedRaft <- atomically $ do
-                modifyTVar (raftContext vRaft) $ \oldRaft ->
-                        setRaftLog checkpointedLog
-                        $ setRaftState checkpointedState oldRaft
-                readTVar (raftContext vRaft)
-            return checkpointedRaft
+                    (committedLog,committedState) <- commitEntries (raftLog updatedRaft) (logIndex $ aeCommittedTime req) (raftState updatedRaft)
+                    infoM _log $ printf "%v: Committed at %d" (raftName raft) (lastCommitted committedLog)
+                    (checkpointedLog,checkpointedState) <- checkpoint committedLog committedState
+                    checkpointedRaft <- atomically $ do
+                        modifyTVar (raftContext vRaft) $ \oldRaft ->
+                                setRaftLog checkpointedLog
+                                $ setRaftState checkpointedState oldRaft
+                        readTVar (raftContext vRaft)
+                    return checkpointedRaft
+                else return updatedRaft
         alwaysContinue _ = True
 
 doSynchronize :: (RaftLog l e v) => Raft l e v -> ((RaftContext l e v) -> AppendEntries e -> IO (RaftContext l e v)) -> (Name -> Bool) -> IO ()
@@ -413,11 +421,13 @@ commit vRaft clients = do
         term = raftCurrentTerm raft
         cfg = raftStateConfiguration $ raftState raft
     (prevTime,entries) <- gatherUnsynchronizedEntries (raftMembers raft) (clusterConfiguration cfg) initialLog
+    infoM _log $ printf "%v: Broadcasting %d entries after %d" leader (length entries) (logIndex $ prevTime)
     results <- goAppendEntries cs cfg term prevTime (lastCommittedTime initialLog) entries
     let members = raftMembers raft
         newMembers = updateMembers members results
         newCommittedIndex = membersSafeAppendedIndex newMembers $ clusterConfiguration cfg
         newTerm = membersHighestTerm newMembers
+    infoM _log $ printf "%v: Member appended indexes are %v" leader (show $ membersAppendedIndex newMembers $ clusterConfiguration cfg)
     atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->
         setRaftMembers newMembers oldRaft
     if newTerm > (raftCurrentTerm raft)
@@ -455,8 +465,8 @@ commit vRaft clients = do
 
 gatherUnsynchronizedEntries :: (RaftLog l e v) => Members -> Configuration -> l -> IO (RaftTime,[RaftLogEntry e])
 gatherUnsynchronizedEntries members cfg log = do
-    let startIndex = maximum [0,minimum $ membersAppendedIndex members cfg ]
-        prevIndex = maximum [(-1),(startIndex - 1)]
+    let prevIndex = minimum $ membersAppendedIndex members cfg
+        startIndex = prevIndex + 1
     if prevIndex < 0
         then do
             let count = (lastAppended log - startIndex) + 1

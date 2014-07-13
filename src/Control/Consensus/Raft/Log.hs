@@ -357,9 +357,11 @@ instance (Serialize e,State v IO e) => Log (ListLog e v) IO (RaftLogEntry e) (Ra
             then return log
             else do
                 let term = maximum $ map entryTerm newEntries
-                return log {
-                    listLogLastAppended = RaftTime term (index + (length newEntries) - 1),
-                    listLogEntries = (take index (listLogEntries log)) ++ newEntries
+                    logEntries = (take index (listLogEntries log)) ++ newEntries
+                    appendedTime = RaftTime term ( (length logEntries) - 1)
+                return $ log {
+                    listLogEntries = logEntries,
+                    listLogLastAppended = appendedTime
                     }
     fetchEntries log index count = do
         let entries = listLogEntries log
@@ -367,7 +369,7 @@ instance (Serialize e,State v IO e) => Log (ListLog e v) IO (RaftLogEntry e) (Ra
 
     commitEntry oldLog commitIndex entry = do
         let newLog = oldLog {
-                listLogLastCommitted = RaftTime (entryTerm entry) commitIndex
+                listLogLastCommitted = RaftTime (entryTerm entry) (minimum [commitIndex,lastAppended oldLog])
                 }
         return newLog
 

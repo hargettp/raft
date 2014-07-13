@@ -14,7 +14,8 @@
 
 module TestRaft (
     tests,
-    troubleshoot
+    troubleshoot,
+    timeBound
 ) where
 
 -- local imports
@@ -575,12 +576,10 @@ waitForLeader vRafts = do
             else
                 retry
 
-{-
 timeBound :: Int -> IO () -> IO ()
 timeBound delay action = do
     outcome <- race (threadDelay delay) action
     assertBool "Test should not block" $ outcome == Right ()
--}
 
 allLeaders :: [Raft IntLog IntCommand IntState] -> IO [Maybe Name]
 allLeaders vRafts = do
