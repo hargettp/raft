@@ -45,6 +45,8 @@ module Control.Consensus.Raft.Log (
     setRaftMembers,
     setRaftLog,
     setRaftState,
+    raftData,
+    setRaftData,
 
     ListLog(..),
     mkListLog,
@@ -324,6 +326,18 @@ setRaftState state raft = raft {
         raftState = state
         }
 
+raftData :: (RaftLog l e v) => RaftContext l e v -> v
+raftData raft = raftStateData $ raftState raft
+
+{-|
+Update the 'raftStateData' for this instance.
+-}
+setRaftData :: (RaftLog l e v) => v -> RaftContext l e v -> RaftContext l e v
+setRaftData newData raft = raft {
+        raftState = (raftState raft) {
+            raftStateData = newData
+            }
+        }
 
 --------------------------------------------------------------------------------
 -- List log
