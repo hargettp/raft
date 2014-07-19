@@ -29,6 +29,8 @@ import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Types
 
+import Data.Log
+
 -- external imports
 
 import Control.Concurrent
@@ -54,7 +56,9 @@ A client of a Raft cluster.
 data Client = Client {
     clientEndpoint :: Endpoint,
     clientName :: Name,
-    clientConfiguration :: RaftConfiguration
+    clientConfiguration :: RaftConfiguration,
+    clientIndex :: Index,
+    clientLeader :: Maybe Name
 }
 
 {-|
@@ -65,20 +69,22 @@ newClient :: Endpoint -> Name -> RaftConfiguration -> Client
 newClient endpoint name cfg = Client {
     clientConfiguration = cfg,
     clientEndpoint = endpoint,
-    clientName = name
+    clientName = name,
+    clientIndex = 0,
+    clientLeader = Nothing
 }
 
 {-|
 Perform an action on the cluster.
 -}
-performAction :: (Serialize c) => Client -> RaftAction c -> IO RaftTime
+performAction :: (Serialize c) => Client -> RaftAction c -> IO (RaftTime,Client)
 performAction client action = do
-    -- TODO consider whether there is an eventual timeout
-    -- in case the cluster can't be reached
     let cfg = clientConfiguration client
-        leader = case clusterLeader $ clusterConfiguration cfg of
+        leader = case clientLeader client of
             Just lead -> [lead]
-            Nothing -> []
+            Nothing -> case clusterLeader $ clusterConfiguration cfg of
+                Just lead -> [lead]
+                Nothing -> []
         members = leader ++ (clusterMembers $ clusterConfiguration cfg)
         cs = (newCallSite (clientEndpoint client) (clientName client))
     perform cs cfg members members
@@ -86,24 +92,30 @@ performAction client action = do
         perform cs cfg members [] = do
             infoM _log $ printf "Client %v can't find any members" (clientName client)
             -- timeout in case there are issues
-            threadDelay $ 100 * 1000
+            threadDelay $ timeoutClientBackoff $ clusterTimeouts cfg
             infoM _log $ printf "Client %v searching again for members" (clientName client)
             perform cs cfg members members
         perform cs cfg members (leader:others) = do
             -- infoM _log $ "Client " ++ (clientName client) ++ " sending action " ++ (show action) ++ " to " ++ leader
-            maybeResult <- goPerformAction cs cfg leader action
+            maybeResult <- goPerformAction cs cfg leader $ ClientRequest {
+                clientRequestName = clientName client,
+                clientRequestIndex = clientIndex client,
+                clientRequestAction = action
+                }
             -- infoM _log $ "Client " ++ (clientName client) ++ " sent action " ++ (show action) ++ " to " ++ leader
             infoM _log $ printf "Client %v received response %s from %s" (clientName client) (show maybeResult) leader
             case maybeResult of
                 Just result -> if (memberActionSuccess result)
-                    then return $ memberLastCommitted result
+                    then return (memberLastCommitted result,client {
+                        clientIndex = (clientIndex client) + 1,
+                        clientLeader = memberLeader result})
                     else case memberLeader result of
                         -- follow the redirect to the correct leader
                         Just newLeader -> do
                             -- if the new leader is the same as the old leader, but we still failed,
                             -- then pause before trying again
                             if newLeader == leader
-                                then threadDelay $ 100 * 100
+                                then threadDelay $ timeoutClientBackoff $ clusterTimeouts cfg
                                 else return ()
                             perform cs cfg members (newLeader:others)
                         -- keep trying the others until a leader is found

@@ -105,6 +105,7 @@ and thus require different timeout values to operate correctly.
 data Timeouts = Timeouts {
     timeoutRpc :: Timeout, -- ^ maximum time to wait before deciding an RPC call has failed
     timeoutClientRpc :: Timeout, -- ^ maximum time clients waits before decinding an RPC call to a member has failed
+    timeoutClientBackoff :: Timeout, -- ^ delay after trying to perform an action with all members before trying each member again
     timeoutHeartbeat :: Timeout, -- ^ expected time between heartbeats that prove the leader is still active
     timeoutPulse :: Timeout, -- ^ maximum length between pulses from the leader proving the leader is still active (must be less than heartbeat)
     timeoutElectionRange :: (Timeout,Timeout) -- ^ the range of times from which an election timeout will be selected
@@ -129,6 +130,7 @@ timeouts rpc =
         in Timeouts {
             timeoutRpc = rpc,
             timeoutClientRpc = 5 * rpc,
+            timeoutClientBackoff = 4 * rpc,
             timeoutHeartbeat = heartbeat,
             timeoutPulse = 7 * rpc, -- must be less than the heartbeat
             timeoutElectionRange = (5 * heartbeat,10 * heartbeat)

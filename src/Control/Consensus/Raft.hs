@@ -361,7 +361,8 @@ doServe vRaft actions = do
     raft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint raft
         leader = raftName raft
-    onPerformAction endpoint leader $ \action reply -> do
+    onPerformAction endpoint leader $ \req reply -> do
+        let action = clientRequestAction req
         atomically $ writeMailbox actions $ Just (action,reply)
     doServe vRaft actions
 

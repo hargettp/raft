@@ -25,6 +25,8 @@ module Control.Consensus.Raft.Protocol (
 
     RequestVote(..),
 
+    ClientRequest(..),
+
     -- * Client call
     goPerformAction,
 
@@ -114,6 +116,24 @@ data RequestVote = RequestVote {
 
 instance Serialize RequestVote
 
+data ClientRequest a = ClientRequest {
+    clientRequestName :: Name,
+    clientRequestIndex :: Index,
+    clientRequestAction :: RaftAction a
+}
+
+instance (Serialize a) => Serialize (ClientRequest a) where
+    get = do
+        name <- get
+        index <- get
+        action <- get
+        return $ ClientRequest name index action
+
+    put req = do
+        put $ clientRequestName req
+        put $ clientRequestIndex req
+        put $ clientRequestAction req
+
 methodAppendEntries :: String
 methodAppendEntries = "appendEntries"
 
@@ -172,13 +192,13 @@ Invoked by clients to request that a cluster perform an action. Not formally
 part of the Raft algorithm, this extension enables client applications to
 interact with a cluster managed via Raft.
 -}
-goPerformAction :: (Serialize e) => CallSite
+goPerformAction :: (Serialize a) => CallSite
                     -> RaftConfiguration
                     -> Name
-                    -> RaftAction e
+                    -> ClientRequest a
                     -> IO (Maybe MemberResult)
-goPerformAction cs cfg member action = do
-    maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ clusterTimeouts cfg) $ encode action
+goPerformAction cs cfg member req = do
+    maybeMsg <- callWithTimeout cs member methodPerformAction (timeoutClientRpc $ clusterTimeouts cfg) $ encode req
     case maybeMsg of
         Just msg -> case decode msg of
                         Right result -> return $ Just result
@@ -214,7 +234,7 @@ onRequestVote endpoint server fn = do
 {-|
 Wait for a request from a client to perform an action, and process it when it arrives.
 -}
-onPerformAction :: (Serialize e) => Endpoint -> Name -> (RaftAction e -> Reply MemberResult -> IO ()) -> IO ()
+onPerformAction :: (Serialize e) => Endpoint -> Name -> (ClientRequest e -> Reply MemberResult -> IO ()) -> IO ()
 onPerformAction endpoint member fn = do
     (bytes,reply) <- hear endpoint member methodPerformAction
     infoM _log $ "Heard performAction on " ++ member

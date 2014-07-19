@@ -177,7 +177,7 @@ test3ClusterAdd1 transportF cfg = do
         infoM _log $ "Leaders are " ++ (show leaders)
         _ <- checkForConsistency (1 :: Integer) leader mRafts
         withClient transport "client1" cfg $ \client -> do
-            RaftTime _ clientIndex <- performAction client $ ((Cfg $ AddParticipants ["server4"]) :: RaftAction IntCommand)
+            (RaftTime _ clientIndex,_) <- performAction client $ ((Cfg $ AddParticipants ["server4"]) :: RaftAction IntCommand)
             assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
             _ <- waitForLeader vRafts
             newLeaders <- allLeaders vRafts
@@ -240,7 +240,7 @@ testClient transportF cfg = do
                                 performAction client $ Cmd $ Add 1)
         case errOrResult of
             Right clientResult -> do
-                let RaftTime _ clientIndex = clientResult
+                let (RaftTime _ clientIndex,_) = clientResult
                 assertBool "Client index should be 0" $ clientIndex == 0
             Left _ -> do
                 assertBool "Performing action failed" False
@@ -256,7 +256,7 @@ testConsistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 1
+                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 1
                                 assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
                                 threadDelay $ 5 * 1000 * 1000
                                 states <- allStates vRafts
@@ -278,7 +278,7 @@ test2Consistency transportF cfg = do
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
                                 _ <- performAction client $ Cmd $ Add 3
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ Multiply 5
+                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Multiply 5
                                 assertBool  (printf "Client index should be 1: %v" (show clientIndex)) $ clientIndex == 1
                                 threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
@@ -299,7 +299,7 @@ test3Consistency transportF cfg = do
                                 _ <- waitForLeader vRafts
                                 _ <- performAction client $ Cmd $ Add 3
                                 _ <- performAction client $ Cmd $ Multiply 5
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ Subtract 2
+                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Subtract 2
                                 assertBool  (printf "Client index should be 2: %v" (show clientIndex)) $ clientIndex == 2
                                 threadDelay $ 2 * 1000 * 1000
                                 checkForConsistency_ vRafts)
@@ -327,7 +327,7 @@ test10Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Add 3
                                 _ <- performAction client $ Cmd $ Multiply 5
                                 _ <- performAction client $ Cmd $ Subtract 2
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
+                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
                                 threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
@@ -355,7 +355,7 @@ test5Cluster10Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Add 3
                                 _ <- performAction client $ Cmd $ Multiply 5
                                 _ <- performAction client $ Cmd $ Subtract 2
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
+                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
                                 threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
@@ -383,7 +383,7 @@ test7Cluster10Consistency transportF cfg = do
                                 _ <- performAction client $ Cmd $ Add 3
                                 _ <- performAction client $ Cmd $ Multiply 5
                                 _ <- performAction client $ Cmd $ Subtract 2
-                                RaftTime _ clientIndex <- performAction client $ Cmd $ Add 3
+                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 3
                                 assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
                                 threadDelay $ 2 * 1000 * 1000
                                 checkForConsistency_ vRafts)
@@ -449,7 +449,7 @@ testGoPerformAction transportF = do
             clusterConfiguration = (clusterConfiguration raftcfg) {configurationLeader = Just server
             }}
     finally (do
-            response <- goPerformAction cs cfg server action
+            response <- goPerformAction cs cfg server $ ClientRequest client 0 action
             case response of
                 Just result -> assertBool "Result should be true" $ memberActionSuccess result
                 Nothing -> assertBool "No response" False)
@@ -477,7 +477,7 @@ testClientPerformAction transportF cfg = do
     let raftClient = newClient endpoint client cfg
         action = Cmd $ Add 1
     finally (do
-                result <- performAction raftClient action
+                (result,_) <- performAction raftClient action
                 assertBool "Result should be true" $ result == RaftTime 1 1)
                 (unbindEndpoint_ endpoint client)
 
@@ -499,7 +499,7 @@ testWithClientPerformAction transportF cfg = do
                     })
                 (unbindEndpoint_ endpoint server)
     let action = Cmd $ Add 1
-    result <- withClient transport client cfg $ \raftClient -> do
+    (result,_) <- withClient transport client cfg $ \raftClient -> do
         pause
         performAction raftClient action
     assertBool "Result should be true" $ result == RaftTime 1 1
