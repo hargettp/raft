@@ -554,7 +554,7 @@ checkForEquality delay vRafts = do
                         in return $ all (== results !! 0) results
     return ()
     where
-        waitForEquality msg fn = do 
+        waitForEquality msg fn = do
             outcome <- race (threadDelay delay)
                         (atomically $ do
                             rafts <- mapM (\vRaft -> readTVar $ raftContext vRaft) vRafts
