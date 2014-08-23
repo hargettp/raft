@@ -80,7 +80,7 @@ _log :: String
 _log = "raft.consensus"
 
 type Actions c = Mailbox (Maybe (RaftAction c,Reply MemberResult))
-type Requests = Mailbox (Index,Reply MemberResult)
+type Replies = Mailbox (Index,Reply MemberResult)
 
 {-|
 Run the core Raft consensus algorithm for the indicated server.  This function
@@ -318,14 +318,14 @@ lead vRaft = do
         readTVar (raftContext vRaft)
     let name = raftName raft
         term = raftCurrentTerm raft
-    requests <- atomically $ newMailbox
+    replies <- atomically $ newMailbox
     actions <- atomically $ newMailbox
     infoM _log $ printf "Server %v leading in term %v with members %s" name (show term) (show $ raftMembers raft)
     raceAll_ $ [doPulse vRaft actions,
                 doVote vRaft,
                 doRespond vRaft,
                 doServe vRaft actions,
-                doPerform vRaft actions requests]
+                doPerform vRaft actions replies]
 
 doPulse :: (RaftLog l e v) => Raft l e v -> Actions c -> IO ()
 doPulse vRaft actions = do
@@ -370,14 +370,14 @@ doServe vRaft actions = do
 Leaders commit entries to their log, once enough members have appended those entries.
 Once committed, the leader replies to the client who requested the action.
 -}
-doPerform :: (RaftLog l e v) => Raft l e v -> Actions e -> Requests -> IO ()
-doPerform vRaft actions requests = do
-    append vRaft actions requests
-    commit vRaft requests
-    doPerform vRaft actions requests
+doPerform :: (RaftLog l e v) => Raft l e v -> Actions e -> Replies -> IO ()
+doPerform vRaft actions replies = do
+    append vRaft actions replies
+    commit vRaft replies
+    doPerform vRaft actions replies
 
-append :: (RaftLog l e v) => Raft l e v -> Actions e -> Requests -> IO ()
-append vRaft actions requests = do
+append :: (RaftLog l e v) => Raft l e v -> Actions e -> Replies -> IO ()
+append vRaft actions replies = do
     (raft,maybeAction) <- atomically $ do
         maybeAction <- readMailbox actions
         raft <- readTVar (raftContext vRaft)
@@ -408,12 +408,12 @@ append vRaft actions requests = do
             atomically $ do
                 modifyTVar (raftContext vRaft) $ \oldRaft ->
                     setRaftLog revisedLog $ setRaftState revisedState oldRaft
-                writeMailbox requests (lastAppended revisedLog,reply)
+                writeMailbox replies (lastAppended revisedLog,reply)
             infoM _log $ printf "%v: Appended 1 action at index %v" (raftName raft) nextIndex
             return ()
 
-commit :: (RaftLog l e v) => Raft l e v -> Requests -> IO ()
-commit vRaft requests = do
+commit :: (RaftLog l e v) => Raft l e v -> Replies -> IO ()
+commit vRaft replies = do
     raft <- atomically $ readTVar (raftContext vRaft)
     let initialLog = raftLog raft
         leader = raftName raft
@@ -461,7 +461,7 @@ commit vRaft requests = do
                 setRaftLog revisedLog
                     $ setRaftState revisedState
                         $ setRaftMembers newMembers oldRaft
-            notifyClients vRaft requests revisedLog revisedState
+            notifyClients vRaft replies revisedLog revisedState
     return ()
 
 gatherUnsynchronizedEntries :: (RaftLog l e v) => Members -> Configuration -> l -> IO (RaftTime,[RaftLogEntry e])
@@ -489,19 +489,19 @@ gatherUnsynchronizedEntries members cfg log = do
         isCommandEntry = isCommandAction . entryAction
         commandEntries = takeWhile isCommandEntry
 
-notifyClients :: (RaftLog l e v) => Raft l e v -> Requests -> l -> RaftState v -> IO ()
-notifyClients vRaft requests newLog newState = do
+notifyClients :: (RaftLog l e v) => Raft l e v -> Replies -> l -> RaftState v -> IO ()
+notifyClients vRaft replies newLog newState = do
     maybeReply <- atomically $ do
         modifyTVar (raftContext vRaft) $ \oldRaft ->
             setRaftLog newLog $ setRaftState newState oldRaft
-        maybeClient <- tryPeekMailbox requests
+        maybeClient <- tryPeekMailbox replies
         case maybeClient of
             Nothing -> return Nothing
             Just (index,reply) ->
                 if index <= (lastCommitted newLog)
                     then do
                         updatedRaft <- readTVar (raftContext vRaft)
-                        _ <- readMailbox requests
+                        _ <- readMailbox replies
                         return $ Just $ reply $ mkResult True updatedRaft
                     else return Nothing
     case maybeReply of
