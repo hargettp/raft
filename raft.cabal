@@ -41,6 +41,7 @@ library
                        Control.Consensus.Raft, 
                        Control.Consensus.Raft.Actions,
                        Control.Consensus.Raft.Client,
+                       Control.Consensus.Raft.Clients,
                        Control.Consensus.Raft.Log,
                        Control.Consensus.Raft.Members,
                        Control.Consensus.Raft.Protocol,

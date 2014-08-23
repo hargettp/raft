@@ -43,6 +43,8 @@ module Control.Consensus.Raft.Log (
     raftMembers,
     raftSafeAppendedTerm,
     setRaftMembers,
+    raftClients,
+    setRaftClients,
     setRaftLog,
     setRaftState,
     raftData,
@@ -61,6 +63,7 @@ module Control.Consensus.Raft.Log (
 
 import Data.Log
 import Control.Consensus.Raft.Actions
+import Control.Consensus.Raft.Clients
 import Control.Consensus.Raft.Members
 import Control.Consensus.Raft.Types
 
@@ -131,6 +134,7 @@ data RaftState v = (Serialize v) => RaftState {
     raftStateConfigurationIndex :: Maybe Index,
     raftStateConfiguration :: RaftConfiguration,
     raftStateMembers :: Members,
+    raftStateClients :: Clients,
     raftStateData :: v
 }
 
@@ -148,6 +152,7 @@ mkRaftState initialData cfg name = RaftState {
     raftStateConfigurationIndex = Nothing,
     raftStateConfiguration = cfg,
     raftStateMembers = mkMembers cfg initialRaftTime,
+    raftStateClients = mkClients,
     raftStateData = initialData
 }
 
@@ -255,6 +260,16 @@ raftSafeAppendedTerm raft =
     let members = raftMembers raft
         cfg = raftConfiguration raft
         in membersSafeAppendedTerm members cfg
+
+setRaftClients :: Clients -> RaftContext l e v -> RaftContext l e v
+setRaftClients clients raft = raft {
+    raftState = (raftState raft) {
+        raftStateClients = clients
+        }
+    }
+
+raftClients :: (RaftLog l e v) => RaftContext l e v -> Clients
+raftClients raft = raftStateClients $ raftState raft
 
 {-|
 Update the last candidate in a new 'RaftContext'
