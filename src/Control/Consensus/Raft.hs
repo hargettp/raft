@@ -79,7 +79,7 @@ import Text.Printf
 _log :: String
 _log = "raft.consensus"
 
-type Actions c = Mailbox (Maybe (RaftAction c,Reply MemberResult))
+type Requests c = Mailbox (Maybe (ClientRequest c,Reply MemberResult))
 type Replies = Mailbox (Index,Reply MemberResult)
 
 {-|
@@ -319,26 +319,26 @@ lead vRaft = do
     let name = raftName raft
         term = raftCurrentTerm raft
     replies <- atomically $ newMailbox
-    actions <- atomically $ newMailbox
+    requests <- atomically $ newMailbox
     infoM _log $ printf "Server %v leading in term %v with members %s" name (show term) (show $ raftMembers raft)
-    raceAll_ $ [doPulse vRaft actions,
+    raceAll_ $ [doPulse vRaft requests,
                 doVote vRaft,
                 doRespond vRaft,
-                doServe vRaft actions,
-                doPerform vRaft actions replies]
+                doServe vRaft requests,
+                doPerform vRaft requests replies]
 
-doPulse :: (RaftLog l e v) => Raft l e v -> Actions c -> IO ()
-doPulse vRaft actions = do
+doPulse :: (RaftLog l e v) => Raft l e v -> Requests c -> IO ()
+doPulse vRaft requests = do
     raft <- atomically $ do
         raft <- readTVar (raftContext vRaft)
-        empty <- isEmptyMailbox actions
+        empty <- isEmptyMailbox requests
         if empty
-            then writeMailbox actions Nothing
+            then writeMailbox requests Nothing
             else return ()
         return raft
     let cfg = raftStateConfiguration $ raftState raft
     threadDelay $ timeoutPulse $ clusterTimeouts cfg
-    doPulse vRaft actions
+    doPulse vRaft requests
 
 {-|
     As a leader, wait for 'AppendEntries' requests and process them, 
@@ -356,27 +356,26 @@ doRespond vRaft = do
 {-|
 Service requests from clients
 -}
-doServe :: (RaftLog l e v) => Raft l e v -> Actions e -> IO ()
-doServe vRaft actions = do
+doServe :: (RaftLog l e v) => Raft l e v -> Requests e -> IO ()
+doServe vRaft requests = do
     raft <- atomically $ readTVar (raftContext vRaft)
     let endpoint = raftEndpoint raft
         leader = raftName raft
     onPerformAction endpoint leader $ \req reply -> do
-        let action = clientRequestAction req
-        atomically $ writeMailbox actions $ Just (action,reply)
-    doServe vRaft actions
+        atomically $ writeMailbox requests $ Just (req,reply)
+    doServe vRaft requests
 
 {-|
 Leaders commit entries to their log, once enough members have appended those entries.
 Once committed, the leader replies to the client who requested the action.
 -}
-doPerform :: (RaftLog l e v) => Raft l e v -> Actions e -> Replies -> IO ()
-doPerform vRaft actions replies = do
-    append vRaft actions replies
+doPerform :: (RaftLog l e v) => Raft l e v -> Requests e -> Replies -> IO ()
+doPerform vRaft requests replies = do
+    append vRaft requests replies
     commit vRaft replies
-    doPerform vRaft actions replies
+    doPerform vRaft requests replies
 
-append :: (RaftLog l e v) => Raft l e v -> Actions e -> Replies -> IO ()
+append :: (RaftLog l e v) => Raft l e v -> Requests e -> Replies -> IO ()
 append vRaft actions replies = do
     (raft,maybeAction) <- atomically $ do
         maybeAction <- readMailbox actions
@@ -384,8 +383,9 @@ append vRaft actions replies = do
         return (raft,maybeAction)
     case maybeAction of
         Nothing -> return ()
-        Just (action,reply) -> do
-            let oldLog = raftLog raft
+        Just (req,reply) -> do
+            let action = clientRequestAction req
+                oldLog = raftLog raft
                 oldState = raftState raft
                 term = raftCurrentTerm raft
                 nextIndex = (lastAppended oldLog) + 1
