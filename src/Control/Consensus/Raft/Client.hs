@@ -16,9 +16,10 @@
 module Control.Consensus.Raft.Client (
 
     Client,
-    newClient,
+    mkClient,
 
-    performAction
+    performAction,
+    performActions
 
 ) where
 
@@ -65,8 +66,8 @@ data Client = Client {
 Create a new client with the provided 'Name' to which members
 can respond to the client's requests.
 -}
-newClient :: Endpoint -> Name -> RaftConfiguration -> Client
-newClient endpoint name cfg = Client {
+mkClient :: Endpoint -> Name -> RaftConfiguration -> Client
+mkClient endpoint name cfg = Client {
     clientConfiguration = cfg,
     clientEndpoint = endpoint,
     clientName = name,
@@ -103,6 +104,7 @@ performAction client action = do
                 clientRequestAction = action
                 }
             -- infoM _log $ "Client " ++ (clientName client) ++ " sent action " ++ (show action) ++ " to " ++ leader
+            -- infoM _log $ printf "Clients %v sent action with index %v to leader %v" (clientName client) (clientIndex client) leader
             infoM _log $ printf "Client %v received response %s from %s" (clientName client) (show maybeResult) leader
             case maybeResult of
                 Just result -> if (memberActionSuccess result)
@@ -121,3 +123,13 @@ performAction client action = do
                         -- keep trying the others until a leader is found
                         Nothing -> perform cs cfg members others
                 Nothing ->  perform cs cfg members others
+
+{-|
+    Perform a series of actions, returning the cluster's response from the last action
+-}
+performActions :: (Serialize c) => Client -> [RaftAction c] -> IO (RaftTime,Client)
+performActions _ [] = error "No actions to perform"
+performActions client [action] = performAction client action
+performActions client (action:actions) = do
+            (_,newClient) <- performAction client action
+            performActions newClient actions

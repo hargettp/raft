@@ -48,6 +48,7 @@ module Control.Consensus.Raft (
 
 import Control.Consensus.Raft.Actions
 import Control.Consensus.Raft.Client
+import Control.Consensus.Raft.Clients
 import Control.Consensus.Raft.Protocol
 import Control.Consensus.Raft.Log
 import Control.Consensus.Raft.Members
@@ -139,12 +140,17 @@ doFollow vRaft = do
                 then infoM _log $ printf "%v: Appending %d at %d" (raftName raft) count nextIndex
                 else return ()
             newLog <- appendEntries log nextIndex (aeEntries req)
+            let oldClients = raftClients raft
+                entries = aeEntries req
+                oldState = raftState raft
+                newClients = foldl (\clients entry -> appendClientRequest (entryClient entry) (entryClientIndex entry) clients) oldClients entries
+                newState = oldState {raftStateClients = newClients}
             if count > 0
                 then infoM _log $ printf "%v: Appended %d at %d" (raftName raft) count (lastAppended newLog)
                 else return ()
             updatedRaft <- atomically $ do
                     preCommitConfigurationChange vRaft (aeEntries req)
-                    modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog oldRaft
+                    modifyTVar (raftContext vRaft) $ \oldRaft -> setRaftLog newLog $ setRaftState newState oldRaft
                     readTVar (raftContext vRaft)
             if (logIndex $ aeCommittedTime req) > (lastCommitted $ raftLog updatedRaft)
                 then do
@@ -362,7 +368,16 @@ doServe vRaft requests = do
     let endpoint = raftEndpoint raft
         leader = raftName raft
     onPerformAction endpoint leader $ \req reply -> do
-        atomically $ writeMailbox requests $ Just (req,reply)
+        -- atomically $ writeMailbox requests $ Just (req,reply)
+        latestRaft <- atomically $ readTVar (raftContext vRaft)
+        let clients = raftClients latestRaft
+            client = clientRequestName req
+            clientIndex = clientRequestIndex req
+        if isClientRequestCommitted client clientIndex clients
+            then reply $ mkResult True latestRaft
+            else if isClientRequestAppended client clientIndex clients
+                then reply $ mkResult False latestRaft
+                else atomically $ writeMailbox requests $ Just (req,reply)
     doServe vRaft requests
 
 {-|
@@ -392,11 +407,19 @@ append vRaft actions replies = do
                 revisedAction = case action of
                     Cmd _ -> action
                     cfgAction -> Cfg $ SetConfiguration $ applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldState) cfgAction
-            newLog <- appendEntries oldLog nextIndex [RaftLogEntry term revisedAction]
+            newLog <- appendEntries oldLog nextIndex [
+                RaftLogEntry {
+                    entryTerm = term, 
+                    entryClient = clientRequestName req,
+                    entryClientIndex = clientRequestIndex req,
+                    entryAction = revisedAction}]
+            let updatedState = oldState {
+                raftStateClients = appendClientRequest (clientRequestName req) (clientRequestIndex req) $ raftStateClients oldState
+                }
             (revisedLog,revisedState) <- case revisedAction of
                 Cfg (SetConfiguration newCfg) -> do
                     let newState = oldState {
-                        raftStateConfiguration = (raftStateConfiguration oldState) {
+                        raftStateConfiguration = (raftStateConfiguration updatedState) {
                             clusterConfiguration = newCfg
                         },
                         raftStateConfigurationIndex = case newCfg of
@@ -452,9 +475,14 @@ commit vRaft replies = do
                             let revisedCfg = case (clusterConfiguration $ raftStateConfiguration newState) of
                                     JointConfiguration _ jointNew -> jointNew
                                     newCfg -> newCfg
+                                revisedClientIndex = 1 + raftStateClientIndex newState
                             revisedLog <- appendEntries newLog ((lastAppended newLog) + 1)
-                                    [RaftLogEntry (raftStateCurrentTerm newState) (Cfg $ SetConfiguration revisedCfg)]
-                            let revisedState = newState {raftStateConfigurationIndex = Nothing}
+                                    [RaftLogEntry {
+                                        entryTerm = (raftStateCurrentTerm newState), 
+                                        entryClient = leader,
+                                        entryClientIndex = raftStateClientIndex newState,
+                                        entryAction = (Cfg $ SetConfiguration revisedCfg)}]
+                            let revisedState = newState {raftStateConfigurationIndex = Nothing,raftStateClientIndex = revisedClientIndex}
                             return (revisedLog,revisedState)
                         else return (newLog,newState)
             atomically $ modifyTVar (raftContext vRaft) $ \oldRaft ->

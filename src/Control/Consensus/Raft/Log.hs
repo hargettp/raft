@@ -131,6 +131,7 @@ data RaftState v = (Serialize v) => RaftState {
     raftStateCurrentTerm :: Term,
     raftStateLastCandidate :: Maybe Name,
     raftStateName :: Name,
+    raftStateClientIndex :: Index,
     raftStateConfigurationIndex :: Maybe Index,
     raftStateConfiguration :: RaftConfiguration,
     raftStateMembers :: Members,
@@ -149,6 +150,7 @@ mkRaftState initialData cfg name = RaftState {
     raftStateCurrentTerm = 0,
     raftStateLastCandidate = Nothing,
     raftStateName = name,
+    raftStateClientIndex = -1,
     raftStateConfigurationIndex = Nothing,
     raftStateConfiguration = cfg,
     raftStateMembers = mkMembers cfg initialRaftTime,
@@ -161,6 +163,8 @@ The type of entry that a 'RaftLog' manages.
 -}
 data RaftLogEntry e = (Serialize e) => RaftLogEntry {
     entryTerm :: Term,
+    entryClient :: Name,
+    entryClientIndex :: Index,
     entryAction :: RaftAction e
 }
 
@@ -170,10 +174,14 @@ deriving instance (Show e) => Show (RaftLogEntry e)
 instance (Serialize e) => Serialize (RaftLogEntry e) where
     get = do
         term <- get
+        client <- get
+        index <- get
         action <- get
-        return $ RaftLogEntry term action
-    put (RaftLogEntry term action) = do
+        return $ RaftLogEntry term client index action
+    put (RaftLogEntry term client index action) = do
         put term
+        put client
+        put index
         put action
 
 instance (Serialize e,State v IO e) => State (RaftState v) IO (RaftLogEntry e) where
@@ -196,17 +204,21 @@ instance (Serialize e,State v IO e) => State (RaftState v) IO (RaftLogEntry e) w
             -- TODO check configuration cases
             canApply _ = return True
 
-    applyEntry oldRaftState entry = applyAction $ entryAction entry
+    applyEntry oldRaftState entry = let client = entryClient entry
+                                        clientIndex = entryClientIndex entry
+                                        newClients = commitClientRequest client clientIndex $ raftStateClients oldRaftState
+                                        in applyAction newClients $ entryAction entry
         where
-            applyAction (Cmd cmd) = do
+            applyAction newClients (Cmd cmd) = do
                 let oldData = raftStateData oldRaftState
                 newData <- applyEntry oldData cmd
-                return $ oldRaftState {raftStateData = newData}
-            applyAction action = do
+                return $ oldRaftState {raftStateClients = newClients, raftStateData = newData}
+            applyAction newClients action = do
                 let cfg = applyConfigurationAction (clusterConfiguration $ raftStateConfiguration oldRaftState) action
                     members = raftStateMembers oldRaftState
                 infoM _log $ printf "New configuration is %v" (show cfg)
                 return $ oldRaftState {
+                    raftStateClients = newClients,
                     raftStateMembers = reconfigureMembers members cfg initialRaftTime,
                     raftStateConfiguration = (raftStateConfiguration oldRaftState) {
                         clusterConfiguration = cfg

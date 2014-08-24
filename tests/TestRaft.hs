@@ -177,8 +177,8 @@ test3ClusterAdd1 transportF cfg = do
         infoM _log $ "Leaders are " ++ (show leaders)
         _ <- checkForConsistency (1 :: Integer) leader mRafts
         withClient transport "client1" cfg $ \client -> do
-            (RaftTime _ clientIndex,_) <- performAction client $ ((Cfg $ AddParticipants ["server4"]) :: RaftAction IntCommand)
-            assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
+            (RaftTime _ actionIndex,_) <- performAction client $ ((Cfg $ AddParticipants ["server4"]) :: RaftAction IntCommand)
+            assertBool (printf "Action index should be 0: %v" (show actionIndex)) $ actionIndex == 0
             _ <- waitForLeader vRafts
             newLeaders <- allLeaders vRafts
             infoM _log $ printf "New leaders are %v" (show newLeaders)
@@ -240,8 +240,8 @@ testClient transportF cfg = do
                                 performAction client $ Cmd $ Add 1)
         case errOrResult of
             Right clientResult -> do
-                let (RaftTime _ clientIndex,_) = clientResult
-                assertBool "Client index should be 0" $ clientIndex == 0
+                let (RaftTime _ actionIndex,_) = clientResult
+                assertBool "Action index should be 0" $ actionIndex == 0
             Left _ -> do
                 assertBool "Performing action failed" False
 
@@ -256,8 +256,8 @@ testConsistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
-                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 1
-                                assertBool (printf "Client index should be 0: %v" (show clientIndex)) $ clientIndex == 0
+                                (RaftTime _ actionIndex,_) <- performAction client $ Cmd $ Add 1
+                                assertBool (printf "Action index should be 0: %v" (show actionIndex)) $ actionIndex == 0
                                 threadDelay $ 5 * 1000 * 1000
                                 states <- allStates vRafts
                                 assertBool "All states should be equal" $ all (== (IntState 1)) states
@@ -277,9 +277,10 @@ test2Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
-                                _ <- performAction client $ Cmd $ Add 3
-                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Multiply 5
-                                assertBool  (printf "Client index should be 1: %v" (show clientIndex)) $ clientIndex == 1
+                                (RaftTime _ actionIndex,_) <- performActions client [
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5]
+                                assertBool  (printf "Action index should be 1: %v" (show actionIndex)) $ actionIndex == 1
                                 threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
         case errOrResult of
@@ -297,10 +298,11 @@ test3Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Subtract 2
-                                assertBool  (printf "Client index should be 2: %v" (show clientIndex)) $ clientIndex == 2
+                                (RaftTime _ actionIndex,_) <- performActions client [
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2]
+                                assertBool  (printf "Action index should be 2: %v" (show actionIndex)) $ actionIndex == 2
                                 threadDelay $ 2 * 1000 * 1000
                                 checkForConsistency_ vRafts)
         case errOrResult of
@@ -318,17 +320,18 @@ test10Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 3
-                                assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
+                                (RaftTime _ actionIndex,_) <- performActions client [
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3]
+                                assertBool  (printf "Action index should be 9: %v" (show actionIndex)) $ actionIndex == 9
                                 threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
         case errOrResult of
@@ -346,17 +349,18 @@ test5Cluster10Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 3
-                                assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
+                                (RaftTime _ actionIndex,_) <- performActions client [
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3]
+                                assertBool  (printf "Action index should be 9: %v" (show actionIndex)) $ actionIndex == 9
                                 threadDelay $ 5 * 1000 * 1000
                                 checkForConsistency_ vRafts)
         case errOrResult of
@@ -374,17 +378,18 @@ test7Cluster10Consistency transportF cfg = do
                 return ())
             (withClient transport "client1" cfg $ \client -> do
                                 _ <- waitForLeader vRafts
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                _ <- performAction client $ Cmd $ Add 3
-                                _ <- performAction client $ Cmd $ Multiply 5
-                                _ <- performAction client $ Cmd $ Subtract 2
-                                (RaftTime _ clientIndex,_) <- performAction client $ Cmd $ Add 3
-                                assertBool  (printf "Client index should be 9: %v" (show clientIndex)) $ clientIndex == 9
+                                (RaftTime _ actionIndex,_) <- performActions client [
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3,
+                                    Cmd $ Multiply 5,
+                                    Cmd $ Subtract 2,
+                                    Cmd $ Add 3]
+                                assertBool  (printf "Action index should be 9: %v" (show actionIndex)) $ actionIndex == 9
                                 threadDelay $ 2 * 1000 * 1000
                                 checkForConsistency_ vRafts)
         case errOrResult of
@@ -474,7 +479,7 @@ testClientPerformAction transportF cfg = do
             (unbindEndpoint_ endpoint server)
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint client
-    let raftClient = newClient endpoint client cfg
+    let raftClient = mkClient endpoint client cfg
         action = Cmd $ Add 1
     finally (do
                 (result,_) <- performAction raftClient action
@@ -603,7 +608,7 @@ withClient :: Transport -> Name -> RaftConfiguration -> (Client -> IO a) -> IO a
 withClient transport name cfg fn = do
     endpoint <- newEndpoint [transport]
     bindEndpoint_ endpoint name
-    let client = newClient endpoint name cfg
+    let client = mkClient endpoint name cfg
     finally (fn client)
         (unbindEndpoint_ endpoint name)
 
