@@ -57,6 +57,7 @@ import Data.Log
 
 -- external imports
 
+import Control.Applicative hiding (empty)
 import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Exception
@@ -78,6 +79,31 @@ import Text.Printf
 
 _log :: String
 _log = "raft.consensus"
+
+newtype Consensus l v a = Consensus {consent :: TVar (RaftContext l v) -> IO a}
+
+instance Functor (Consensus l v) where
+    -- fmap :: (a -> b) -> f a -> f b
+    fmap f (Consensus g) = Consensus $ \vRaft -> do
+        v <- g vRaft
+        return $ f v
+
+instance Applicative (Consensus l v) where
+    -- pure :: a -> f a
+    pure a = return a
+    -- (<*>) :: f (a -> b) -> f a -> f b
+    (Consensus f) <*> (Consensus g) = Consensus $ \vRaft -> do
+        v <- g vRaft
+        fn <- f vRaft
+        return $ fn v
+
+instance Monad (Consensus l v) where
+    -- (>>=) :: forall a b. m a -> (a -> m b) -> m b
+    (Consensus f) >>= g = Consensus $ \vRaft -> do
+        v <- f vRaft
+        (consent $ g v) vRaft
+    -- return :: a -> m a
+    return a = Consensus (\_ -> return a)
 
 {-|
 Run the core Raft consensus algorithm for the indicated server.  This function
